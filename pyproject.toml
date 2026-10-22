@@ -22,7 +22,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = [
+  "pytest>=8",
+  "graphifyy>=0.9.90",
+]
 
 [project.scripts]
 skillvm = "skillvm.cli:app"

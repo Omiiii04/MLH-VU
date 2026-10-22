@@ -45,6 +45,29 @@ python -m venv .venv
 
 All 38 tests pass (1 skipped: symlinks on Windows).
 
+## Codebase Knowledge Graph (Graphify)
+
+SkillVM uses [Graphify](https://github.com/Graphify-Labs/graphify) to build and query an AST-based knowledge graph of the codebase, enabling visual architecture exploration and fast context lookups.
+
+```powershell
+# Query knowledge graph
+.venv\Scripts\graphify query "how does the compiler work?"
+
+# Explain a node or trace paths
+.venv\Scripts\graphify explain "compile_skill"
+.venv\Scripts\graphify path "Sandbox" "compile_skill"
+
+# Update graph after code changes
+.venv\Scripts\graphify extract . --code-only
+.venv\Scripts\graphify cluster-only .
+
+# Visualizations and reports:
+# - graphify-out/graph.html (interactive force-directed graph)
+# - graphify-out/GRAPH_TREE.html (collapsible hierarchy tree)
+# - graphify-out/GRAPH_REPORT.md (god nodes, community hubs, architecture insights)
+# - graphify-out/wiki/index.md (navigable wiki)
+```
+
 ## Providers
 
 Copy `.env.example` to `.env` and fill in keys.
