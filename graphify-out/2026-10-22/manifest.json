@@ -48,10 +48,10 @@
     "semantic_hash": "3897caa1f0f5e627caf6dfdf2e3343c0"
   },
   "pyproject.toml": {
-    "mtime": 1792656267.615168,
-    "seen": 1792658915.3923028,
-    "ast_hash": "96d5d51c69da8743ae7306ca2abaa345",
-    "semantic_hash": "96d5d51c69da8743ae7306ca2abaa345"
+    "mtime": 1792659097.8381212,
+    "seen": 1792660502.8085704,
+    "ast_hash": "6dd69fa2e3522f223b28fba505178222",
+    "semantic_hash": ""
   },
   "src/skillvm/__init__.py": {
     "mtime": 1792655499.6943872,
@@ -166,5 +166,35 @@
     "seen": 1792658915.3923297,
     "ast_hash": "95867e58bb5296b6f7243d5b6243c1a6",
     "semantic_hash": "95867e58bb5296b6f7243d5b6243c1a6"
+  },
+  "README.md": {
+    "mtime": 1792659160.281789,
+    "seen": 1792660502.8085964,
+    "ast_hash": "ed8d6347f308e3a9da13687f3a859905",
+    "semantic_hash": ""
+  },
+  "eval/corpus/01-copy-json/skill.md": {
+    "mtime": 1792658321.6178968,
+    "seen": 1792660502.8085978,
+    "ast_hash": "a252f10871857cc78956f8509f462d26",
+    "semantic_hash": ""
+  },
+  "eval/corpus/02-malformed/skill.md": {
+    "mtime": 1792658321.623105,
+    "seen": 1792660502.8085988,
+    "ast_hash": "ff2506d052994ec3ae7333caecbbc488",
+    "semantic_hash": ""
+  },
+  "eval/corpus/03-permission-violation/skill.md": {
+    "mtime": 1792658321.6255774,
+    "seen": 1792660502.8086,
+    "ast_hash": "96812c0601e996f6f826614a31435b0f",
+    "semantic_hash": ""
+  },
+  "eval/corpus/04-verify-catch/skill.md": {
+    "mtime": 1792658321.6305876,
+    "seen": 1792660502.8086011,
+    "ast_hash": "e948f68a6f60f33f40969826ea9ebc17",
+    "semantic_hash": ""
   }
 }

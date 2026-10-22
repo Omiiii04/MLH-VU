@@ -1,1 +1,10 @@
-{"0": "providers.py", "1": "compiler.py", "2": "execute_ir", "3": "eval.py", "4": "cli.py", "5": "test_security.py", "6": "compile_skill", "7": "redact.py", "8": "skillvm"}
+{
+  "0": "providers.py",
+  "1": "compiler.py",
+  "2": "execute_ir",
+  "3": "eval.py",
+  "5": "test_security.py",
+  "6": "compile_skill",
+  "7": "redact.py",
+  "8": "skillvm"
+}
