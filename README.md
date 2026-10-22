@@ -23,14 +23,32 @@ Natural-language agent skills (such as instructions in `SKILL.md` files) are typ
 
 ## Key Results
 
-SkillVM includes an automated evaluation harness (`skillvm eval`) that tests compiled execution against baseline raw-prompt execution across 4 reference skills in `eval/corpus/` ($n=2$ per skill, 8 evaluations per arm, reported in `eval/results.json`):
+SkillVM includes an automated evaluation harness (`skillvm eval`) that tests compiled execution against baseline execution across the test corpus.
 
-| Arm                |   Task Success Rate   |   False Success Rate   | Verified Success Rate |  Error Rate  | Mean Duration |
-| :----------------- | :--------------------: | :--------------------: | :--------------------: | :----------: | :-----------: |
-| **SkillVM**  | **75.0%** (0.75) | **0.0%** (0.00) | **50.0%** (0.50) | 25.0% (0.25) |   ~1.69 ms   |
-| **Baseline** |      50.0% (0.50)      | **25.0%** (0.25) |      0.0% (0.00)      | 0.0% (0.00) |   ~2.27 ms   |
+### Current 15-Skill Benchmark (`eval/results.json`)
 
-Compiling to typed IR with deterministic verification eliminated false-success outcomes (`0.00` vs `0.25`), ensuring failures are caught and reported rather than silently ignored.
+Evaluated across all 15 skills in `eval/corpus/` ($N=15$ independent tasks with ground-truth verification):
+
+| Arm | Task Success Rate | False Success Rate | Verified Success Rate | Error Rate | Mean Duration |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **SkillVM** | **26.7%** (0.27) | **0.0%** (0.00) | **13.3%** (0.13) | 6.7% (0.07)* | ~4.87 ms |
+| **Baseline (Deterministic Parser)** | 13.3% (0.13) | **73.3%** (0.73) | 0.0% (0.00) | 0.0% (0.00) | ~0.52 ms |
+
+*\*The single error in SkillVM was the intended compile-time rejection of `02-malformed`.*
+
+- **Zero False-Successes**: Compiling skills into typed IR with runtime postcondition verification completely eliminated false-success outcomes (**0.0%** vs **73.3%**). Every adversarial or failing task (malformed specifications, missing permissions, invalid schemas, missing source files, corrupted JSON, and path traversal attempts) was caught and reported as failed rather than falsely claiming completion.
+- **Baseline Arm Clarification**: The offline baseline is a deterministic step parser reusing SkillVM helpers without IR compilation or postcondition verification. It is **not** an LLM agent.
+- **Real LLM Baseline**: A genuine multi-turn raw-skill LLM tool-use loop (`run_llm_baseline_arm`) is implemented in `eval.py` and can be executed via `skillvm eval --live`. When provider credentials are not configured, the live LLM baseline is accurately reported as unexecuted (`llm_baseline_executed: false`).
+
+### Historical Reference Run (`eval/historical_results.json`)
+
+Preserved provenance from initial 4-skill evaluation ($N=4, n=2$ per skill, 8 evaluations per arm):
+
+| Arm | Task Success Rate | False Success Rate | Verified Success Rate | Error Rate | Mean Duration |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **SkillVM (Historical)** | **75.0%** (0.75) | **0.0%** (0.00) | **50.0%** (0.50) | 25.0% (0.25) | ~1.69 ms |
+| **Baseline (Historical)** | 50.0% (0.50) | **25.0%** (0.25) | 0.0% (0.00) | 0.0% (0.00) | ~2.27 ms |
+
 
 ---
 
@@ -253,8 +271,13 @@ effect_overrides:
 - `inputs` *(list)*: Declared input fields with `name` and `type` (`string`, `number`, `boolean`).
 - `permissions` *(list)*: Allowed operations (`fs.read`, `fs.write`, `json.parse`, `data.transform`, `verify.run`).
 - `postconditions` *(list)*: Target validation criteria.
-  - **Supported kinds**: `file_exists`, `file_contains_fields`, `json_matches_schema`, `checksum_equals`, `schema_unchanged`.
-  - **Stubs / Environment-restricted**: `row_count_delta` (requires database), `http_status` (local-only mode disables network).
+  - **Supported kinds**:
+    - `file_exists`: Verifies output file presence on the filesystem.
+    - `file_contains_fields`: Validates required top-level JSON fields.
+    - `json_matches_schema`: Full JSON Schema validation engine supporting nested types, array items and count constraints, string min/max length and regex patterns, numeric ranges, required properties, combinators (`allOf`, `anyOf`, `oneOf`, `not`), and malformed schema rejection.
+    - `checksum_equals`: Validates SHA-256 content hashes.
+    - `schema_unchanged`: Verifies dictionary keys remain consistent across data transforms.
+    - `row_count_delta`: Genuine SQLite relational database check (`db_path`, `table`, `delta`, or `expected_count`); explicitly fails if database configuration is missing or unsupported (no unconditional passes).
   - **Vacuous checkers rejected by compiler**: `always_true`, `true`, `pass`, `noop`.
 - `effect_overrides` *(map)*: Override default tool effects (`read`, `reversible_write`, `irreversible`, `external`).
 
@@ -289,21 +312,29 @@ Prints the sequence of graph nodes, node types, dependencies, and declared effec
 #### 3. Execute a Workflow
 
 ```bash
-skillvm run ir.json --workspace . --inputs '{"source_path": "eval/corpus/01-copy-json/fixture.json", "dest_path": "output.json"}' --approve-all
+skillvm run ir.json --workspace ./ws --inputs '{"source_path": "input.json", "dest_path": "output.json"}'
 ```
 
 *Options:*
 
-- `--workspace`, `-w`: Path to the execution workspace root (default: `.`).
+- `--workspace`, `-w`: Path to the execution workspace root (must resolve within an authorized root).
 - `--inputs`, `-i`: JSON string containing input parameters (default: `{}`).
-- `--approve-all`: Automatically generate approval tokens for nodes with `irreversible` or `external` effects.
+- `--approve-all`: Convenience flag for offline CLI testing that approves all approval nodes. *(Note: `approve_all=true` is rejected by the production HTTP API).*
 
-#### 4. Generate an Approval Token
+#### 4. Safe Human-in-the-Loop Approval & Resumption
 
-For workflows paused at an approval gate:
+When an execution reaches a node requiring approval (`irreversible` or `external` effect), the runtime transitions to `NEEDS_APPROVAL` and generates a cryptographically unguessable 32-byte approval token (`secrets.token_urlsafe(32)`).
+
+The runtime safely persists the run's IR, inputs, workspace, and completed side effects. Resuming execution using the token resumes the workflow without re-executing completed side effects:
 
 ```bash
+# In the CLI:
 skillvm approve <run_id> <node_id>
+
+# Via HTTP API (POST /runs/{run_id}/approve):
+curl -X POST http://127.0.0.1:8477/runs/<run_id>/approve \
+  -H "Content-Type: application/json" \
+  -d '{"node_id": "<node_id>", "token": "<token>"}'
 ```
 
 #### 5. Probe Configured Providers
@@ -318,11 +349,16 @@ skillvm probe --provider lmstudio
 
 #### 6. Run the Evaluation Harness
 
-Execute benchmark comparisons between the SkillVM compiled arm and the baseline prompt arm:
+Run benchmark evaluations comparing the SkillVM compiled arm against the baseline prompt arms across the corpus:
 
 ```bash
-skillvm eval --corpus eval/corpus --n 2 --out eval/results.json
+# Deterministic offline evaluation (SkillVM arm vs deterministic step parser baseline)
+skillvm eval --corpus eval/corpus --n 1 --out eval/results.json
+
+# Live evaluation with real LLM tool-use baseline (requires configured LLM credentials)
+skillvm eval --corpus eval/corpus --n 1 --out eval/results.json --live
 ```
+
 
 ---
 
@@ -358,9 +394,14 @@ The server exposes the following JSON endpoints:
 | :------- | :------------------------- | :---------------------------------------- | :------------------------------------------------------------------------- |
 | `GET`  | `/health`                | Check service health and version          | None                                                                       |
 | `POST` | `/compile`               | Compile skill markdown to IR              | `{"source": "<SKILL.MD TEXT>", "llm": false}`                            |
-| `POST` | `/runs`                  | Submit a workflow for sandboxed execution | `{"ir": {...}, "inputs": {...}, "workspace": ".", "approve_all": false}` |
+| `POST` | `/runs`                  | Submit a workflow for sandboxed execution | `{"ir": {...}, "inputs": {...}, "workspace": "sub_ws"}`                   |
 | `GET`  | `/runs/{run_id}`         | Poll execution status and node states     | None                                                                       |
-| `POST` | `/runs/{run_id}/approve` | Guidance for approving pending runs       | `{"node_id": "<NODE_ID>"}`                                               |
+| `POST` | `/runs/{run_id}/approve` | Resume a paused run using unguessable token | `{"node_id": "<NODE_ID>", "token": "<TOKEN>"}`                            |
+
+*API Security Controls:*
+- `POST /runs` requires `workspace` to be a strict descendant of `SKILLVM_WORKSPACE_ROOT`. Root itself (`.`), empty strings, directory traversal (`..`), symlinks resolving to root, and absolute paths are rejected with HTTP 400.
+- `POST /runs` rejects `approve_all=true` with HTTP 400 as an unsafe production authorization mechanism.
+- `POST /runs/{run_id}/approve` verifies the unguessable 32-byte cryptographic token and resumes the workflow without re-executing previously completed side effects.
 
 ---
 
@@ -390,8 +431,9 @@ Interactive visualizations are available under `graphify-out/`:
 ```text
 .
 ├── eval/                     # Evaluation harness corpus and benchmarking data
-│   ├── corpus/               # 4 reference skills with fixtures and ground-truth checkers
-│   └── results.json          # Benchmark output comparing SkillVM vs Baseline
+│   ├── corpus/               # 15 reference skills with fixtures and ground-truth checkers
+│   ├── results.json          # Benchmark output comparing SkillVM vs Baseline (15 skills)
+│   └── historical_results.json # Preserved historical initial benchmark (4 skills)
 ├── graphify-out/             # Knowledge graph files, architecture wiki, and visual trees
 ├── src/
 │   └── skillvm/              # Core application package
@@ -409,7 +451,7 @@ Interactive visualizations are available under `graphify-out/`:
 │       ├── runtime.py        # Directed graph execution engine and state machine
 │       ├── server.py         # FastAPI REST service and static UI mounting
 │       ├── tools.py          # Workspace sandbox and deterministic verifiers
-│       └── ui/               # Single-page web UI static assets (HTML/CSS/JS)
+│       └── ui/               # Single-Page web UI static assets (HTML/CSS/JS)
 ├── tests/                    # Unit, security, provider, server, and live test suites
 ├── LICENSE                   # Apache 2.0 legal license text
 └── pyproject.toml            # Build configuration, entrypoints, and dependencies
@@ -421,21 +463,33 @@ Interactive visualizations are available under `graphify-out/`:
 
 | Threat Vector                      | Mitigation Strategy                                                                | Implementation                           |
 | :--------------------------------- | :--------------------------------------------------------------------------------- | :--------------------------------------- |
-| **Path Traversal**           | Path resolution is verified with `relative_to(workspace)`                        | `Sandbox._safe_path()` in `tools.py` |
+| **Path Traversal**           | Path resolution verified with `relative_to(workspace)` and strict descendant checks | `Sandbox._safe_path()` in `tools.py` |
 | **Symlink Escape**           | Canonical path resolution validates each segment remains within sandbox            | `Sandbox._safe_path()` in `tools.py` |
+| **Workspace Root Escape**    | Rejects workspaces resolving to root itself, empty strings, traversal, or drive absolute paths | `_resolve_workspace()` in `server.py` |
 | **Unauthorized Tool Calls**  | Tool invocation strictly validates against granted skill permissions               | `_check_permission()` in `tools.py`  |
 | **Malformed IR / Injection** | Pydantic schema validation rejects unsupported types, cycles, and invalid bindings | `_validate_ir()` in `compiler.py`    |
-| **Unapproved Side Effects**  | Actions marked `irreversible` or `external` require explicit token approval    | `ApprovalNode` gate in `runtime.py`  |
+| **Unapproved Side Effects**  | Actions marked `irreversible` or `external` require explicit token approval        | `ApprovalNode` gate in `runtime.py`  |
+| **Snapshot Collisions**      | Isolated per-run snapshots (`.snapshot_<ws>_<run_id>`) prevent concurrent run clobbering | `Sandbox` in `tools.py` |
 | **Duplicate / Replay Runs**  | Unique idempotency keys are tracked in a global execution registry                 | `_RUN_REGISTRY` in `runtime.py`      |
 | **Secret / Key Leakage**     | Regular expression masking strips API keys and auth headers from logs and errors   | `redact.py`                            |
 
-> **Security Notice**: The workspace sandbox operates via directory copies (`.snapshot_*`) and relative path verification. It is a workspace filesystem boundary, not an OS-level isolation container (such as Docker or Linux namespaces).
+> **Rollback Guarantees and Boundary Notice**:
+> - **Reversible Filesystem Boundary**: Workspace restoration restores files modified within the declared workspace directory using per-run isolated snapshots (`.snapshot_<ws>_<run_id>`). Snapshot failures are explicitly reported as errors rather than silently continuing with false rollback expectations.
+> - **Irreversible / External Effects**: External side effects (such as out-of-tree files, external relational database mutations, or external HTTP requests) cannot be rolled back by workspace restoration.
 
 ---
 
 ## Testing
 
-SkillVM includes 62 tests across 8 test modules.
+SkillVM includes 111 tests across 9 test modules:
+- `test_compiler.py`: Deterministic parsing, diagnostic codes, and type validation.
+- `test_eval.py`: Evaluation harness, workspace isolation cleanup, LLM baseline tool loop, and ground truth integrity.
+- `test_live.py`: Live provider integration smoke tests (Gemini, OpenRouter, LM Studio).
+- `test_llm_compile.py`: Model-assisted compilation, repair passes, and fallback chains.
+- `test_providers.py`: Provider manager fallback disabling, retry limits, deadlines, auth error handling, and Gemini SDK transport timeout enforcement.
+- `test_runtime.py`: Workflow DAG execution, snapshot isolation, SQLite `row_count_delta`, and full JSON schema verification.
+- `test_security.py`: Workspace isolation (rejecting `.`, empty, traversal, symlink escapes, drive paths), unauthorized tool denial, and secret redaction.
+- `test_server.py`: FastAPI endpoints, `approve_all=true` rejection, and safe approval resumption API.
 
 Run the test suite:
 
@@ -443,20 +497,19 @@ Run the test suite:
 pytest tests/ -v
 ```
 
-*Note on test execution:*
-
-- Remote provider tests (`test_live.py`) requiring live API keys are automatically skipped when credentials are not configured in `.env`.
-- Windows filesystem tests skipping symlink creation (`test_security.py::test_symlink_escape_blocked`) are skipped if symlink privileges are restricted by the OS.
-- All non-live tests run deterministically using offline mocks (`FakeProvider`).
+*Actual Suite Results:*
+- **108 passed, 3 skipped** (symlink tests on Windows requiring elevated OS symlink privileges).
+- Offline tests run deterministically with zero mock leaks.
 
 ---
 
 ## Known Limitations
 
-- **Database Verifier**: The `row_count_delta` postcondition checker is a placeholder stub and does not currently connect to external relational databases (`tools.py`).
+- **External Effect Rollback**: As noted in the security model, external side effects outside the workspace sandbox directory (e.g. external network APIs) cannot be rolled back by filesystem snapshots.
+- **Process Lifetime for Approval Resumption**: Paused run state is persisted in memory in `_RUN_REGISTRY` during the server process lifetime; restarting the server process clears active pending approval tokens.
 - **Network Verifier in Local Mode**: The `http_status` postcondition checker is disabled when running in local-only mode (`tools.py`).
-- **Approval Re-execution**: In the current FastAPI service (`/runs/{run_id}/approve`), runs do not persist the original IR; to approve a paused run via API, the client re-submits the request with `approve_all=true` or passes approval tokens via inputs (`server.py`).
 - **Single-Host Binding**: The web service binds to `127.0.0.1` by default and does not include multi-tenant user authentication (`server.py`).
+
 
 ---
 

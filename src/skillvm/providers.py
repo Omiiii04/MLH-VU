@@ -114,6 +114,9 @@ class FakeProvider(BaseProvider):
     def list_models(self, settings: Settings | None = None) -> list[str]:
         return ["fake-model"]
 
+    def get_model_name(self, settings: Settings | None = None) -> str:
+        return "fake-model"
+
     def probe(self, settings: Settings | None = None) -> dict[str, Any]:
         return {"system_instruction": True, "json_schema": True, "token_usage": True}
 
@@ -124,6 +127,9 @@ class FakeProvider(BaseProvider):
 
 class GeminiProvider(BaseProvider):
     name = "google"
+
+    def get_model_name(self, settings: Settings | None = None) -> str:
+        return getattr(self, "_current_model", None) or (settings.gemini_model if settings else os.environ.get("GEMINI_MODEL", "")) or "gemini"
 
     def generate(self, system: str, user: str, response_schema: dict | None = None, settings: Settings | None = None) -> str:
         try:
@@ -140,10 +146,15 @@ class GeminiProvider(BaseProvider):
             raise ModelNotFoundError("GEMINI_MODEL not set — run: skillvm probe")
 
         self._current_model = model  # record for ProviderManager
-        client = genai.Client(api_key=api_key)
+
+        timeout = settings.request_timeout if settings else 60
+        http_options = None
+        if hasattr(gtypes, "HttpOptions"):
+            http_options = gtypes.HttpOptions(timeout=int(timeout * 1000))
+        client = genai.Client(api_key=api_key, http_options=http_options) if http_options else genai.Client(api_key=api_key)
+
         config_kwargs: dict[str, Any] = {}
         # Use system_instruction if the SDK supports it; fall back to prepended user text.
-        # Detect support by checking for the attribute on GenerateContentConfig.
         use_system_instruction = hasattr(gtypes.GenerateContentConfig, "system_instruction")
         if use_system_instruction and system:
             config_kwargs["system_instruction"] = system
@@ -154,17 +165,11 @@ class GeminiProvider(BaseProvider):
         if response_schema:
             config_kwargs["response_mime_type"] = "application/json"
 
-        timeout = settings.request_timeout if settings else 60
-        # Apply timeout via httpx_options when supported, or accept best-effort.
-        timeout_kwargs: dict[str, Any] = {}
-        if hasattr(gtypes.GenerateContentConfig, "timeout"):
-            timeout_kwargs["timeout"] = timeout
-
         try:
             response = client.models.generate_content(
                 model=model,
                 contents=combined_user,
-                config=gtypes.GenerateContentConfig(**config_kwargs, **timeout_kwargs) if (config_kwargs or timeout_kwargs) else None,
+                config=gtypes.GenerateContentConfig(**config_kwargs) if config_kwargs else None,
             )
             return response.text or ""
         except Exception as e:
@@ -259,8 +264,11 @@ def _classify_genai_error(e: Exception) -> None:
             raise AuthError(str(e)) from e
         if code_str == "NOT_FOUND":
             raise ModelNotFoundError(str(e)) from e
-        if code_str == "RESOURCE_EXHAUSTED":
-            raise RateLimitError(str(e)) from e
+    # Deadline / Timeout classification
+    if status_code in (408, 504):
+        raise ProviderError(f"timeout: HTTP {status_code}") from e
+    if exc_name in ("TimeoutError", "ReadTimeout", "ConnectTimeout", "PoolTimeout"):
+        raise ProviderError(f"timeout: {e}") from e
 
     raise ProviderError(str(e)) from e
 
@@ -274,6 +282,13 @@ class OpenAICompatProvider(BaseProvider):
 
     def __init__(self, name: str = "openrouter"):
         self.name = name
+
+    def get_model_name(self, settings: Settings | None = None) -> str:
+        if getattr(self, "_current_model", None):
+            return self._current_model
+        if self.name == "openrouter":
+            return (settings.openrouter_model if settings else os.environ.get("OPENROUTER_MODEL", "")) or "openrouter-model"
+        return (settings.lmstudio_model if settings else os.environ.get("LMSTUDIO_MODEL", "")) or "lmstudio-model"
 
     def _client_and_model(self, settings: Settings | None):
         try:
@@ -374,7 +389,7 @@ class OpenAICompatProvider(BaseProvider):
 # ---------------------------------------------------------------------------
 
 class ProviderManager:
-    """Tries providers in order; falls back on transient errors."""
+    """Tries providers in order; falls back on transient errors with retries and deadline enforcement."""
 
     def __init__(self, providers: list[BaseProvider], settings: Settings | None = None):
         self.providers = providers
@@ -382,56 +397,107 @@ class ProviderManager:
 
     def generate(self, system: str, user: str, response_schema: dict | None = None) -> ProviderResult:
         settings = self.settings
-        max_fallback = settings.max_fallback if settings else 3
-        deadline = time.monotonic() + (settings.overall_deadline if settings else 120)
+        fallback_enabled = settings.fallback_enabled if settings is not None else True
+        max_fallback = settings.max_fallback if settings is not None else 3
+        max_retries = max(0, settings.max_retries) if settings is not None else 0
+        overall_deadline = settings.overall_deadline if settings is not None else 120
+        deadline = time.monotonic() + overall_deadline
+
+        providers_to_try = self.providers[:1] if not fallback_enabled else self.providers[:max_fallback]
         attempts: list[ProviderAttempt] = []
         phash = prompt_hash(user)
         pexcerpt = excerpt(user)
 
-        for provider in self.providers[:max_fallback]:
-            if time.monotonic() > deadline:
+        for provider in providers_to_try:
+            if time.monotonic() >= deadline:
                 break
-            model = getattr(provider, "_current_model", "") or ""
-            attempt = ProviderAttempt(
-                provider=provider.name,
-                model=model,
-                started_at=time.monotonic(),
-                prompt_hash=phash,
-                prompt_excerpt=pexcerpt,
-            )
-            try:
-                text = provider.generate(system=system, user=user, response_schema=response_schema, settings=settings)
-                attempt.finished_at = time.monotonic()
-                attempt.outcome = "success"
-                # Record the model that was actually used (set by provider during generate).
-                attempt.model = getattr(provider, "_current_model", model) or model
-                attempts.append(attempt)
-                return ProviderResult(
-                    text=text,
+
+            model = provider.get_model_name(settings) if hasattr(provider, "get_model_name") else (getattr(provider, "_current_model", "") or provider.name)
+
+            for attempt_idx in range(max_retries + 1):
+                now = time.monotonic()
+                if now >= deadline:
+                    attempt = ProviderAttempt(
+                        provider=provider.name,
+                        model=getattr(provider, "_current_model", model) or model,
+                        started_at=now,
+                        finished_at=now,
+                        outcome="timeout",
+                        failover_reason=f"Overall deadline of {overall_deadline}s exceeded",
+                        prompt_hash=phash,
+                        prompt_excerpt=pexcerpt,
+                    )
+                    attempts.append(attempt)
+                    break
+
+                remaining_deadline = max(0.001, deadline - now)
+                attempt_settings = settings
+                if settings and settings.request_timeout > remaining_deadline:
+                    import dataclasses
+                    attempt_settings = dataclasses.replace(settings, request_timeout=remaining_deadline)
+
+                attempt = ProviderAttempt(
                     provider=provider.name,
-                    model=attempt.model,
-                    attempts=attempts,
+                    model=getattr(provider, "_current_model", model) or model,
+                    started_at=now,
+                    prompt_hash=phash,
+                    prompt_excerpt=pexcerpt,
                 )
-            except AuthError as e:
-                attempt.outcome = "auth_error"; attempt.failover_reason = str(e)
-                attempt.finished_at = time.monotonic(); attempts.append(attempt)
-                continue  # no retry on auth
-            except ModelNotFoundError as e:
-                attempt.outcome = "model_not_found"; attempt.failover_reason = str(e)
-                attempt.finished_at = time.monotonic(); attempts.append(attempt)
-                continue
-            except RateLimitError as e:
-                attempt.outcome = "rate_limit"; attempt.failover_reason = str(e)
-                attempt.finished_at = time.monotonic(); attempts.append(attempt)
-                continue  # fall back, don`t wait on Retry-After
-            except ProviderError as e:
-                attempt.outcome = "error"; attempt.failover_reason = str(e)
-                attempt.finished_at = time.monotonic(); attempts.append(attempt)
-                continue
-            except Exception as e:
-                attempt.outcome = "error"; attempt.failover_reason = str(e)
-                attempt.finished_at = time.monotonic(); attempts.append(attempt)
-                continue
+
+                try:
+                    text = provider.generate(system=system, user=user, response_schema=response_schema, settings=attempt_settings)
+                    attempt.finished_at = time.monotonic()
+                    attempt.outcome = "success"
+                    attempt.model = getattr(provider, "_current_model", model) or model
+                    attempts.append(attempt)
+                    return ProviderResult(
+                        text=text,
+                        provider=provider.name,
+                        model=attempt.model,
+                        attempts=attempts,
+                    )
+                except AuthError as e:
+                    attempt.outcome = "auth_error"
+                    attempt.failover_reason = str(e)
+                    attempt.finished_at = time.monotonic()
+                    attempt.model = getattr(provider, "_current_model", model) or model
+                    attempts.append(attempt)
+                    break  # Never retry auth errors on same provider
+                except ModelNotFoundError as e:
+                    attempt.outcome = "model_not_found"
+                    attempt.failover_reason = str(e)
+                    attempt.finished_at = time.monotonic()
+                    attempt.model = getattr(provider, "_current_model", model) or model
+                    attempts.append(attempt)
+                    break  # Never retry model not found on same provider
+                except RateLimitError as e:
+                    attempt.outcome = "rate_limit"
+                    attempt.failover_reason = str(e)
+                    attempt.finished_at = time.monotonic()
+                    attempt.model = getattr(provider, "_current_model", model) or model
+                    attempts.append(attempt)
+                    if attempt_idx < max_retries and (deadline - time.monotonic() > 1):
+                        continue
+                    break
+                except ProviderError as e:
+                    is_timeout = "timeout" in str(e).lower()
+                    attempt.outcome = "timeout" if is_timeout else "error"
+                    attempt.failover_reason = str(e)
+                    attempt.finished_at = time.monotonic()
+                    attempt.model = getattr(provider, "_current_model", model) or model
+                    attempts.append(attempt)
+                    if attempt_idx < max_retries and (deadline - time.monotonic() > 0.5):
+                        continue
+                    break
+                except Exception as e:
+                    attempt.outcome = "error"
+                    attempt.failover_reason = str(e)
+                    attempt.finished_at = time.monotonic()
+                    attempt.model = getattr(provider, "_current_model", model) or model
+                    attempts.append(attempt)
+                    if attempt_idx < max_retries and (deadline - time.monotonic() > 0.5):
+                        continue
+                    break
 
         raise ProviderExhaustedError(
             f"All providers failed. Attempts: {[a.outcome for a in attempts]}",

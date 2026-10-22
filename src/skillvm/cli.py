@@ -159,13 +159,16 @@ def eval(
     n: int = typer.Option(3, "--n", help="Runs per skill"),
     out: Path = typer.Option(Path("eval/results.json"), "--out"),
     baseline: bool = typer.Option(True, "--baseline/--no-baseline"),
+    live: bool = typer.Option(False, "--live", help="Run live LLM baseline and LLM-assisted SkillVM with configured provider"),
 ):
     """Run evaluation harness on the skill corpus."""
     from skillvm.eval import run_eval
-    results = run_eval(corpus_dir=corpus_dir, n_per_skill=n, run_baseline=baseline)
+    results = run_eval(corpus_dir=corpus_dir, n_per_skill=n, run_baseline=baseline, run_llm=live)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(results, indent=2), encoding="utf-8")
     typer.echo(f"Eval results written to {out}")
+    if results.get("llm_baseline_skipped_reason"):
+        typer.echo(f"LLM baseline skipped: {results['llm_baseline_skipped_reason']}")
     # Print summary
     arm_results = results.get("arms", {})
     for arm, metrics in arm_results.items():

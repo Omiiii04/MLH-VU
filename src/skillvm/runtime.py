@@ -7,6 +7,7 @@ yields SUCCEEDED_UNVERIFIED, never VERIFIED_SUCCESS.
 """
 from __future__ import annotations
 
+import secrets
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -52,7 +53,7 @@ _ALLOWED: dict[NodeState, set[NodeState]] = {
     NodeState.SKIPPED: set(),     # terminal
     NodeState.CANCELLED: set(),   # terminal
     NodeState.BLOCKED: set(),     # terminal (blocked by permission)
-    NodeState.AWAITING_APPROVAL: {NodeState.RUNNING, NodeState.CANCELLED},
+    NodeState.AWAITING_APPROVAL: {NodeState.RUNNING, NodeState.CANCELLED, NodeState.READY, NodeState.PENDING},
 }
 
 
@@ -84,6 +85,13 @@ class RunRecord:
     started_at: float | None = None
     finished_at: float | None = None
     idempotency_key: str | None = None
+    # Execution resumption state
+    ir: WorkflowIR | None = None
+    inputs: dict[str, Any] = field(default_factory=dict)
+    workspace: Path | None = None
+    granted_permissions: list[str] = field(default_factory=list)
+    node_results: dict[str, Any] = field(default_factory=dict)
+    pending_approvals: dict[str, str] = field(default_factory=dict)
 
 
 # Global run registry — prevents duplicate runs with same idempotency key
@@ -102,26 +110,59 @@ def execute_ir(
     idempotency_key: str | None = None,
     pending_approvals: dict[str, str] | None = None,
     _fault_nodes: dict[str, Exception] | None = None,  # for testing: inject failures
+    _existing_run: RunRecord | None = None,
+    run_id: str | None = None,
 ) -> RunRecord:
     """Execute a compiled IR. Returns RunRecord with final state."""
 
-    if idempotency_key:
-        if idempotency_key in _RUN_REGISTRY:
-            raise DuplicateRunError(f"Run with key '{idempotency_key}' already exists: {_RUN_REGISTRY[idempotency_key]}")
-        _RUN_REGISTRY[idempotency_key] = (run_id := str(uuid.uuid4()))
+    if _existing_run is not None:
+        run = _existing_run
+        run_id = run.run_id
+        run.state = RunState.RUNNING
+        perms = run.granted_permissions
+        approvals = dict(run.pending_approvals)
+        if pending_approvals:
+            approvals.update(pending_approvals)
+        results = dict(run.node_results)
     else:
-        run_id = str(uuid.uuid4())
+        if run_id:
+            actual_run_id = run_id
+            if idempotency_key:
+                if idempotency_key in _RUN_REGISTRY:
+                    raise DuplicateRunError(f"Run with key '{idempotency_key}' already exists: {_RUN_REGISTRY[idempotency_key]}")
+                _RUN_REGISTRY[idempotency_key] = actual_run_id
+        elif idempotency_key:
+            if idempotency_key in _RUN_REGISTRY:
+                raise DuplicateRunError(f"Run with key '{idempotency_key}' already exists: {_RUN_REGISTRY[idempotency_key]}")
+            _RUN_REGISTRY[idempotency_key] = (actual_run_id := str(uuid.uuid4()))
+        else:
+            actual_run_id = str(uuid.uuid4())
+        run_id = actual_run_id
 
-    perms = granted_permissions if granted_permissions is not None else list(ir.permissions)
-    approvals = pending_approvals or {}
+        perms = granted_permissions if granted_permissions is not None else list(ir.permissions)
+        approvals = dict(pending_approvals or {})
+        run = RunRecord(
+            run_id=run_id,
+            skill_id=ir.skill_id,
+            state=RunState.RUNNING,
+            ir=ir,
+            inputs=inputs,
+            workspace=workspace,
+            granted_permissions=perms,
+            idempotency_key=idempotency_key,
+        )
+        run.started_at = time.monotonic()
+        for n in ir.nodes:
+            run.node_records[n.id] = NodeRecord(node_id=n.id)
+        results = {}
+        for n in ir.nodes:
+            if n.type == "input":
+                val = inputs.get(n.name)
+                results[n.id] = val
+        run.node_results = dict(results)
+
     faults = _fault_nodes or {}
-
-    run = RunRecord(run_id=run_id, skill_id=ir.skill_id, state=RunState.RUNNING)
-    run.started_at = time.monotonic()
-    for n in ir.nodes:
-        run.node_records[n.id] = NodeRecord(node_id=n.id)
-
-    sandbox = Sandbox(workspace=workspace, authorized_root=workspace)
+    sandbox = Sandbox(workspace=workspace, authorized_root=workspace, run_id=run_id)
 
     # Snapshot before execution so reversible failures can be rolled back.
     _snapshot_taken = False
@@ -130,8 +171,12 @@ def execute_ir(
     try:
         sandbox.snapshot()
         _snapshot_taken = True
-    except Exception:
-        pass  # snapshot is best-effort; non-fatal
+    except Exception as e:
+        # Report snapshot failures rather than silently continuing with false rollback expectations
+        run.state = RunState.FAILED
+        run.failed_evidence.append({"snapshot": "snapshot_failed", "error": str(e)})
+        run.finished_at = time.monotonic()
+        return run
 
     # Build adjacency: node -> list of dependents; and reverse: node -> dependencies
     nmap = ir.node_map()
@@ -155,10 +200,10 @@ def execute_ir(
                 q.append(w)
 
     # Node results store
-    results: dict[str, Any] = {}
+    results: dict[str, Any] = dict(run.node_results)
     # Seed inputs
     for n in ir.nodes:
-        if n.type == "input":
+        if n.type == "input" and n.id not in results:
             val = inputs.get(n.name)
             results[n.id] = val
 
@@ -167,6 +212,12 @@ def execute_ir(
     for nid in topo_order:
         n = nmap[nid]
         rec = run.node_records[nid]
+
+        # Resumption: if node already succeeded in a prior segment, do not re-execute!
+        if rec.state == NodeState.SUCCEEDED:
+            if nid not in results and nid in run.node_results:
+                results[nid] = run.node_results[nid]
+            continue
 
         # Check if any required dep failed/was skipped
         dep_ok = all(
@@ -183,22 +234,32 @@ def execute_ir(
             rec.transition(NodeState.RUNNING)
             rec.result = results.get(nid)
             rec.transition(NodeState.SUCCEEDED)
+            run.node_results[nid] = rec.result
             continue
 
         if n.type == "approval":
+            expected_token = run.pending_approvals.get(nid)
             token = approvals.get(nid)
-            valid_token = f"approved:{nid}"
-            if token != valid_token:
-                # No valid approval token — block
+            if not expected_token:
+                expected_token = secrets.token_urlsafe(32)
+                run.pending_approvals[nid] = expected_token
+                rec.approval_token = expected_token
+
+            # Unguessable token validation via constant-time compare
+            if not token or not secrets.compare_digest(str(token), str(expected_token)):
                 rec.transition(NodeState.AWAITING_APPROVAL)
                 run.state = RunState.NEEDS_APPROVAL
                 run.finished_at = time.monotonic()
+                run.node_results = dict(results)
                 return run
+
             rec.transition(NodeState.READY)
             rec.transition(NodeState.RUNNING)
             rec.result = {"approved": True, "token": token}
             rec.transition(NodeState.SUCCEEDED)
             results[nid] = rec.result
+            run.node_results[nid] = rec.result
+            run.pending_approvals.pop(nid, None)
             continue
 
         if n.type == "verify":
@@ -218,11 +279,11 @@ def execute_ir(
                 continue
             try:
                 vresult = execute_tool("verify.run", {"check": check, **vargs}, perms, sandbox)
-                rec.result = vresult
                 rec.finished_at = time.monotonic()
                 if vresult.get("passed"):
                     rec.transition(NodeState.SUCCEEDED)
                     results[nid] = vresult
+                    run.node_results[nid] = vresult
                 else:
                     rec.transition(NodeState.FAILED)
                     verify_failures.append({"node": nid, "evidence": vresult.get("evidence", {})})
@@ -250,6 +311,7 @@ def execute_ir(
                 rec.result = result
                 rec.transition(NodeState.SUCCEEDED)
                 results[nid] = result
+                run.node_results[nid] = result
             except Exception as e:
                 rec.error = str(e)
                 rec.transition(NodeState.FAILED)
@@ -277,6 +339,7 @@ def execute_ir(
                     rec.finished_at = time.monotonic()
                     rec.transition(NodeState.SUCCEEDED)
                     results[nid] = result
+                    run.node_results[nid] = result
                     last_err = None
                     break
                 except PermissionError_ as e:
@@ -299,6 +362,7 @@ def execute_ir(
         rec.result = results.get(list(n.depends_on)[0]) if n.depends_on else None
         rec.transition(NodeState.SUCCEEDED)
         results[nid] = rec.result
+        run.node_results[nid] = rec.result
 
     run.finished_at = time.monotonic()
 
@@ -347,6 +411,37 @@ def execute_ir(
             pass
 
     return run
+
+
+def resume_run(run: RunRecord, node_id: str, approval_token: str) -> RunRecord:
+    """Resume a paused workflow run awaiting approval at node_id.
+
+    Guarantees:
+    - Verifies the unguessable per-run approval token with constant-time compare.
+    - Resumes workflow execution without re-executing previously completed side effects.
+    """
+    if run.state != RunState.NEEDS_APPROVAL:
+        raise ValueError(f"Run '{run.run_id}' is not awaiting approval (state={run.state.value})")
+    if not run.ir or not run.workspace:
+        raise ValueError(f"Run '{run.run_id}' cannot be resumed: missing saved execution state")
+
+    expected_token = run.pending_approvals.get(node_id)
+    if not expected_token or not secrets.compare_digest(str(approval_token), str(expected_token)):
+        raise PermissionError_(f"Invalid approval token for node '{node_id}' on run '{run.run_id}'")
+
+    approvals = {node_id: approval_token}
+    rec = run.node_records.get(node_id)
+    if rec and rec.state == NodeState.AWAITING_APPROVAL:
+        rec.state = NodeState.PENDING
+
+    return execute_ir(
+        ir=run.ir,
+        inputs=run.inputs,
+        workspace=run.workspace,
+        granted_permissions=run.granted_permissions,
+        pending_approvals=approvals,
+        _existing_run=run,
+    )
 
 
 def _resolve_args(args: dict[str, Any], results: dict[str, Any], nmap: dict) -> dict[str, Any]:

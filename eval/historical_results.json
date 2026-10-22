@@ -1,0 +1,29 @@
+{
+  "_note": "Historical initial evaluation across 4 reference skills in eval/corpus/ (n=2 per skill, 8 evaluations per arm). Preserved for provenance.",
+  "corpus": "eval/corpus",
+  "n_per_skill": 2,
+  "n_skills": 4,
+  "llm_baseline_executed": false,
+  "baseline_type": "deterministic_parser",
+  "baseline_disclaimer": "The baseline is a deterministic step parser that reuses SkillVM helpers. It is NOT an LLM agent.",
+  "arms": {
+    "skillvm": {
+      "n": 8,
+      "n_with_ground_truth": 8,
+      "task_success_rate": 0.75,
+      "false_success_rate": 0.0,
+      "verified_success_rate": 0.50,
+      "error_rate": 0.25,
+      "mean_duration": 0.00169
+    },
+    "baseline": {
+      "n": 8,
+      "n_with_ground_truth": 8,
+      "task_success_rate": 0.50,
+      "false_success_rate": 0.25,
+      "verified_success_rate": 0.0,
+      "error_rate": 0.0,
+      "mean_duration": 0.00227
+    }
+  }
+}

@@ -188,6 +188,76 @@ def test_client_cannot_override_root_via_workspace(tmp_path: Path):
     assert exc_info.value.status_code == 400
 
 
+def test_dot_workspace_rejected(tmp_path: Path):
+    """Client sending '.' as workspace must be rejected."""
+    from fastapi import HTTPException
+    from skillvm.server import _resolve_workspace
+    root = tmp_path / "root"
+    root.mkdir()
+    settings = _make_settings(root)
+    with pytest.raises(HTTPException) as exc_info:
+        _resolve_workspace(".", settings)
+    assert exc_info.value.status_code == 400
+    assert "root" in exc_info.value.detail.lower() or "descendant" in exc_info.value.detail.lower()
+
+
+def test_empty_workspace_rejected(tmp_path: Path):
+    """Client sending empty string or whitespace must be rejected."""
+    from fastapi import HTTPException
+    from skillvm.server import _resolve_workspace
+    root = tmp_path / "root"
+    root.mkdir()
+    settings = _make_settings(root)
+    for empty in ("", "   ", "\t"):
+        with pytest.raises(HTTPException) as exc_info:
+            _resolve_workspace(empty, settings)
+        assert exc_info.value.status_code == 400
+
+
+def test_workspace_resolving_to_root_itself_rejected(tmp_path: Path):
+    """Client sending child/.. which resolves to root itself must be rejected."""
+    from fastapi import HTTPException
+    from skillvm.server import _resolve_workspace
+    root = tmp_path / "root"
+    root.mkdir()
+    child = root / "child"
+    child.mkdir()
+    settings = _make_settings(root)
+    with pytest.raises(HTTPException) as exc_info:
+        _resolve_workspace("child/..", settings)
+    assert exc_info.value.status_code == 400
+
+
+def test_symlink_to_root_rejected(tmp_path: Path):
+    """Symlink pointing to root itself must be rejected."""
+    from fastapi import HTTPException
+    from skillvm.server import _resolve_workspace
+    root = tmp_path / "root"
+    root.mkdir()
+    link = root / "root_link"
+    try:
+        link.symlink_to(root)
+    except (NotImplementedError, OSError):
+        pytest.skip("symlinks not supported on this OS/user")
+    settings = _make_settings(root)
+    with pytest.raises(HTTPException) as exc_info:
+        _resolve_workspace("root_link", settings)
+    assert exc_info.value.status_code == 400
+
+
+def test_drive_absolute_path_rejected(tmp_path: Path):
+    """Drive-absolute paths like C:\\test or \\test are rejected."""
+    from fastapi import HTTPException
+    from skillvm.server import _resolve_workspace
+    root = tmp_path / "root"
+    root.mkdir()
+    settings = _make_settings(root)
+    for p in ("C:\\windows", "\\windows", "/usr"):
+        with pytest.raises(HTTPException) as exc_info:
+            _resolve_workspace(p, settings)
+        assert exc_info.value.status_code == 400
+
+
 # ---------------------------------------------------------------------------
 # Compiler / runtime security (unchanged)
 # ---------------------------------------------------------------------------

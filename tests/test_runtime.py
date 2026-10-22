@@ -247,10 +247,93 @@ effect_overrides:
 1. Write hello to `p` with fs.write
 """
     ir = _compile(skill)
-    approvals = {n.id: f"approved:{n.id}" for n in ir.nodes if n.type == "approval"}
-    run = execute_ir(ir, {"p": "out2.txt"}, workspace=workspace, pending_approvals=approvals)
-    # Should not be NEEDS_APPROVAL; no verify nodes so SUCCEEDED_UNVERIFIED is expected.
-    assert run.state not in (RunState.NEEDS_APPROVAL, RunState.FAILED)
+    approval_nodes = [n for n in ir.nodes if n.type == "approval"]
+    assert approval_nodes
+    anid = approval_nodes[0].id
+
+    # 1. Predictable forged token is rejected -> run stays in NEEDS_APPROVAL
+    forged = {anid: f"approved:{anid}"}
+    run = execute_ir(ir, {"p": "out2.txt"}, workspace=workspace, pending_approvals=forged)
+    assert run.state == RunState.NEEDS_APPROVAL
+    token = run.pending_approvals.get(anid)
+    assert token is not None
+    assert token != f"approved:{anid}"
+
+    # 2. Resuming with genuine per-run token succeeds
+    from skillvm.runtime import resume_run
+    resumed = resume_run(run, anid, token)
+    assert resumed.state not in (RunState.NEEDS_APPROVAL, RunState.FAILED)
+    assert (workspace / "out2.txt").exists()
+
+
+def test_approval_resumption_does_not_reexecute_completed_side_effects(workspace: Path):
+    """Resuming an approved workflow must not re-execute previously completed tool nodes."""
+    skill = """\
+---
+id: approval-side-effect
+inputs:
+  - name: p1
+    type: string
+  - name: p2
+    type: string
+permissions: [fs.write]
+effect_overrides:
+  fs.write: irreversible
+nodes:
+  - id: in_p1
+    type: input
+    name: p1
+    value_type: string
+  - id: in_p2
+    type: input
+    name: p2
+    value_type: string
+  - id: step1
+    type: tool
+    tool: fs.write
+    args:
+      path: {$bind: in_p1}
+      content: "initial_first_step"
+    effect: reversible_write
+    depends_on: [in_p1]
+  - id: ask_user
+    type: approval
+    reason: "confirm before step2"
+    effect: irreversible
+    depends_on: [step1]
+  - id: step2
+    type: tool
+    tool: fs.write
+    args:
+      path: {$bind: in_p2}
+      content: "second_step_done"
+    effect: reversible_write
+    depends_on: [ask_user, in_p2]
+---
+# Test approval resumption
+"""
+    from skillvm.compiler import compile_skill
+    from skillvm.runtime import resume_run
+    ir = compile_skill(skill).ir
+    assert ir is not None
+
+    run = execute_ir(ir, {"p1": "step1.txt", "p2": "step2.txt"}, workspace=workspace)
+    assert run.state == RunState.NEEDS_APPROVAL
+    assert (workspace / "step1.txt").read_text() == "initial_first_step"
+    assert not (workspace / "step2.txt").exists()
+
+    # Tamper with step1 file to detect if step1 gets re-executed on resumption
+    (workspace / "step1.txt").write_text("tampered_marker")
+
+    token = run.pending_approvals["ask_user"]
+    resumed = resume_run(run, "ask_user", token)
+    assert resumed.state not in (RunState.NEEDS_APPROVAL, RunState.FAILED)
+
+    # step2 was executed
+    assert (workspace / "step2.txt").read_text() == "second_step_done"
+    # step1 was NOT re-executed! It still has the marker!
+    assert (workspace / "step1.txt").read_text() == "tampered_marker"
+
 
 
 # ---------------------------------------------------------------------------
@@ -309,3 +392,175 @@ def test_independent_runs_have_different_snapshot_paths(tmp_path: Path):
     assert sb1._snapshot != sb2._snapshot
     sb1.cleanup_snapshot()
     sb2.cleanup_snapshot()
+
+
+# ---------------------------------------------------------------------------
+# Verifier correctness: row_count_delta and json_matches_schema
+# ---------------------------------------------------------------------------
+
+def test_verifier_row_count_delta_sqlite(workspace: Path):
+    import sqlite3
+    from skillvm.tools import execute_tool, Sandbox
+    sb = Sandbox(workspace=workspace, authorized_root=workspace)
+
+    # Missing db_path / table must fail explicitly (not pass unconditionally!)
+    res_no_db = execute_tool("verify.run", {"check": "row_count_delta"}, ["verify.run"], sb)
+    assert res_no_db["passed"] is False
+    assert "error" in res_no_db["evidence"]
+
+    # Setup sqlite database
+    db_file = workspace / "test.db"
+    conn = sqlite3.connect(db_file)
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE users (id INT, name TEXT)")
+    cur.execute("INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Charlie')")
+    conn.commit()
+    conn.close()
+
+    # Genuine count check: matches
+    res_match = execute_tool(
+        "verify.run",
+        {"check": "row_count_delta", "db_path": "test.db", "table": "users", "expected_count": 3},
+        ["verify.run"],
+        sb,
+    )
+    assert res_match["passed"] is True
+    assert res_match["evidence"]["actual_count"] == 3
+
+    # Genuine count check: mismatch fails
+    res_mismatch = execute_tool(
+        "verify.run",
+        {"check": "row_count_delta", "db_path": "test.db", "table": "users", "expected_count": 99},
+        ["verify.run"],
+        sb,
+    )
+    assert res_mismatch["passed"] is False
+    assert res_mismatch["evidence"]["actual_count"] == 3
+
+    # Non-existent DB file fails
+    res_missing_file = execute_tool(
+        "verify.run",
+        {"check": "row_count_delta", "db_path": "missing.db", "table": "users", "expected_count": 0},
+        ["verify.run"],
+        sb,
+    )
+    assert res_missing_file["passed"] is False
+
+
+def test_verifier_json_matches_schema_nested_and_constraints(workspace: Path):
+    import json
+    from skillvm.tools import execute_tool, Sandbox
+    sb = Sandbox(workspace=workspace, authorized_root=workspace)
+
+    schema = {
+        "type": "object",
+        "required": ["id", "user", "tags"],
+        "properties": {
+            "id": {"type": "integer", "minimum": 1, "maximum": 100},
+            "user": {
+                "type": "object",
+                "required": ["name", "email", "role"],
+                "properties": {
+                    "name": {"type": "string", "minLength": 2, "pattern": r"^[A-Z][a-z]+$"},
+                    "email": {"type": "string"},
+                    "role": {"type": "string", "enum": ["admin", "editor", "viewer"]},
+                },
+                "additionalProperties": False,
+            },
+            "tags": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 3,
+                "uniqueItems": True,
+                "items": {"type": "string"},
+            },
+        },
+    }
+
+    # 1. Valid data matching full nested schema
+    valid_data = {
+        "id": 10,
+        "user": {"name": "Alice", "email": "alice@example.com", "role": "admin"},
+        "tags": ["alpha", "beta"],
+    }
+    (workspace / "data.json").write_text(json.dumps(valid_data), encoding="utf-8")
+    res = execute_tool(
+        "verify.run",
+        {"check": "json_matches_schema", "path": "data.json", "schema": schema},
+        ["verify.run"],
+        sb,
+    )
+    assert res["passed"] is True
+
+    # 2. Constraint failure: pattern mismatch ("alice" not capitalized)
+    invalid_pattern = dict(valid_data, user={"name": "alice", "email": "a@b.com", "role": "admin"})
+    (workspace / "data.json").write_text(json.dumps(invalid_pattern), encoding="utf-8")
+    res_pat = execute_tool(
+        "verify.run",
+        {"check": "json_matches_schema", "path": "data.json", "schema": schema},
+        ["verify.run"],
+        sb,
+    )
+    assert res_pat["passed"] is False
+    assert "pattern" in res_pat["evidence"]["error"].lower()
+
+    # 3. Array duplicate failure (uniqueItems)
+    invalid_unique = dict(valid_data, tags=["tag1", "tag1"])
+    (workspace / "data.json").write_text(json.dumps(invalid_unique), encoding="utf-8")
+    res_unique = execute_tool(
+        "verify.run",
+        {"check": "json_matches_schema", "path": "data.json", "schema": schema},
+        ["verify.run"],
+        sb,
+    )
+    assert res_unique["passed"] is False
+    assert "unique" in res_unique["evidence"]["error"].lower()
+
+    # 4. Nested additionalProperties: False violation
+    invalid_extra = dict(valid_data, user={"name": "Alice", "email": "a@b.com", "role": "admin", "extra": 123})
+    (workspace / "data.json").write_text(json.dumps(invalid_extra), encoding="utf-8")
+    res_extra = execute_tool(
+        "verify.run",
+        {"check": "json_matches_schema", "path": "data.json", "schema": schema},
+        ["verify.run"],
+        sb,
+    )
+    assert res_extra["passed"] is False
+    assert "additional" in res_extra["evidence"]["error"].lower()
+
+
+def test_verifier_json_matches_schema_malformed_schemas(workspace: Path):
+    from skillvm.tools import execute_tool, Sandbox
+    sb = Sandbox(workspace=workspace, authorized_root=workspace)
+    (workspace / "sample_str.json").write_text('"sample text"', encoding="utf-8")
+
+    # Non-dict schema
+    res1 = execute_tool(
+        "verify.run",
+        {"check": "json_matches_schema", "path": "sample_str.json", "schema": "not a schema"},
+        ["verify.run"],
+        sb,
+    )
+    assert res1["passed"] is False
+    assert "malformed" in res1["evidence"]["error"].lower()
+
+    # Malformed regex pattern
+    res2 = execute_tool(
+        "verify.run",
+        {"check": "json_matches_schema", "path": "sample_str.json", "schema": {"type": "string", "pattern": "[invalid("}},
+        ["verify.run"],
+        sb,
+    )
+    assert res2["passed"] is False
+    assert "regex" in res2["evidence"]["error"].lower()
+
+    # Unknown type
+    res3 = execute_tool(
+        "verify.run",
+        {"check": "json_matches_schema", "path": "sample_str.json", "schema": {"type": "unknown_type"}},
+        ["verify.run"],
+        sb,
+    )
+    assert res3["passed"] is False
+    assert "unknown type" in res3["evidence"]["error"].lower()
+

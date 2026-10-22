@@ -223,3 +223,88 @@ def test_attempt_records_contain_provider_and_outcome():
     outcomes = {a.outcome for a in attempts}
     assert "auth_error" in outcomes
     assert "rate_limit" in outcomes
+
+
+def test_fallback_disabled_stops_at_first_failure():
+    """When LLM_FALLBACK_ENABLED=False, manager stops after first provider failure."""
+    from skillvm.config import load_settings
+    import dataclasses
+    settings = dataclasses.replace(load_settings(), fallback_enabled=False, max_retries=0, max_fallback=3)
+    p1 = FakeProvider(failures=[ProviderError("p1 failed")])
+    p2 = FakeProvider(responses=["p2 would succeed"])
+    mgr = ProviderManager(providers=[p1, p2], settings=settings)
+
+    with pytest.raises(ProviderExhaustedError) as exc_info:
+        mgr.generate("sys", "user")
+    assert len(exc_info.value.attempts) == 1
+    assert exc_info.value.attempts[0].provider == "fake"
+    assert len(p2.calls) == 0  # Secondary never called
+
+
+def test_retry_limits_on_same_provider():
+    """ProviderManager retries transient errors on same provider up to max_retries."""
+    from skillvm.config import load_settings
+    import dataclasses
+    settings = dataclasses.replace(load_settings(), max_retries=2, fallback_enabled=True)
+    p1 = FakeProvider(failures=[ProviderError("transient 1"), ProviderError("transient 2")], responses=["p1 success"])
+    mgr = ProviderManager(providers=[p1], settings=settings)
+
+    res = mgr.generate("sys", "user")
+    assert res.text == "p1 success"
+    assert len(p1.calls) == 3
+    assert len(res.attempts) == 3
+    assert res.attempts[0].outcome == "error"
+    assert res.attempts[1].outcome == "error"
+    assert res.attempts[2].outcome == "success"
+
+
+def test_overall_deadline_stops_execution():
+    """ProviderManager halts when overall deadline expires."""
+    import time
+    from skillvm.config import load_settings
+    import dataclasses
+
+    class SlowProvider(FakeProvider):
+        def generate(self, system: str, user: str, response_schema: dict | None = None, settings=None) -> str:
+            time.sleep(0.05)
+            raise ProviderError("timeout from slow")
+
+    settings = dataclasses.replace(load_settings(), overall_deadline=0.03, max_retries=5)
+    p1 = SlowProvider()
+    mgr = ProviderManager(providers=[p1], settings=settings)
+
+    with pytest.raises(ProviderExhaustedError) as exc_info:
+        mgr.generate("sys", "user")
+    assert any(a.outcome == "timeout" for a in exc_info.value.attempts)
+
+
+def test_gemini_timeout_sdk_transport_enforcement():
+    """GeminiProvider passes http_options with milliseconds timeout to genai.Client."""
+    from unittest.mock import patch, MagicMock
+    from skillvm.providers import GeminiProvider
+    from skillvm.config import load_settings
+    import dataclasses
+
+    settings = dataclasses.replace(
+        load_settings(),
+        gemini_api_key="test-key",
+        gemini_model="test-model",
+        request_timeout=45.0,
+    )
+    provider = GeminiProvider()
+
+    mock_client_cls = MagicMock()
+    mock_instance = MagicMock()
+    mock_instance.models.generate_content.return_value = MagicMock(text='{"ok": true}')
+    mock_client_cls.return_value = mock_instance
+
+    with patch("google.genai.Client", mock_client_cls):
+        res = provider.generate("sys", "user", settings=settings)
+        assert res == '{"ok": true}'
+        # Verify Client was initialized with http_options timeout = 45000 ms
+        mock_client_cls.assert_called_once()
+        _, kwargs = mock_client_cls.call_args
+        assert "http_options" in kwargs
+        http_opts = kwargs["http_options"]
+        assert http_opts.timeout == 45000
+

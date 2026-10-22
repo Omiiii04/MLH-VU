@@ -84,10 +84,12 @@ class RunResponse(BaseModel):
     failed_evidence: list[dict] = []
     started_at: float | None = None
     finished_at: float | None = None
+    pending_approvals: dict[str, str] = {}
 
 
 class ApproveRequest(BaseModel):
     node_id: str
+    token: str
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +104,7 @@ def _run_to_response(run: RunRecord) -> RunResponse:
         failed_evidence=run.failed_evidence,
         started_at=run.started_at,
         finished_at=run.finished_at,
+        pending_approvals=dict(run.pending_approvals),
     )
 
 
@@ -111,35 +114,51 @@ def _resolve_workspace(requested: str, settings) -> Path:
     Rules:
     - The root is taken from server config (SKILLVM_WORKSPACE_ROOT), never from
       the client request.
-    - Absolute paths in `requested` are rejected.
-    - Resolved path must be a strict descendant of the root (Path.relative_to).
-    - Symlinks must not escape the root.
+    - Empty paths, whitespace, and "." are rejected.
+    - Absolute paths and drive/root-relative paths in `requested` are rejected.
+    - Resolved path must be a strict descendant of the root (not the root itself).
+    - Symlinks must not escape the root or resolve to the root itself.
     """
     root = settings.workspace_root.resolve()
 
-    # Reject absolute paths from client.
-    req_path = Path(requested)
-    if req_path.is_absolute():
+    if not isinstance(requested, str) or not requested.strip():
+        raise HTTPException(status_code=400, detail="Workspace path cannot be empty.")
+
+    clean_req = requested.strip()
+    if clean_req == ".":
+        raise HTTPException(status_code=400, detail="Workspace cannot be the root directory ('.').")
+
+    req_path = Path(clean_req)
+    # Reject absolute paths (including POSIX /etc and Windows drive letters or leading slashes).
+    if req_path.is_absolute() or clean_req.startswith(("/", "\\")) or (len(clean_req) > 1 and clean_req[1] == ":"):
         raise HTTPException(status_code=400, detail="Workspace must be a relative path name, not an absolute path.")
 
-    candidate = (root / requested).resolve()
+    candidate = (root / clean_req).resolve()
+
+    # Must be a strict descendant: root in candidate.parents and candidate != root.
+    if candidate == root or root not in candidate.parents:
+        raise HTTPException(
+            status_code=400,
+            detail="Workspace path must be a strict descendant of the configured workspace root, not the root itself."
+        )
 
     # Enforce containment — raises ValueError if candidate escapes root.
     try:
-        candidate.relative_to(root)
+        rel_parts = candidate.relative_to(root).parts
     except ValueError:
         raise HTTPException(status_code=400, detail="Workspace path must remain inside the configured workspace root.")
 
-    # Symlink containment check: walk each component after the root.
-    try:
-        rel_parts = candidate.relative_to(root).parts
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Workspace path escapes workspace root.")
+    if not rel_parts:
+        raise HTTPException(status_code=400, detail="Workspace path cannot be the workspace root.")
+
+    # Symlink containment check: walk each component from the root.
     accum = root
     for part in rel_parts:
         accum = accum / part
         if accum.is_symlink():
             real = accum.resolve()
+            if real == root or root not in real.parents:
+                raise HTTPException(status_code=400, detail="Symlink in workspace path must resolve to a strict descendant of workspace root.")
             try:
                 real.relative_to(root)
             except ValueError:
@@ -202,12 +221,12 @@ def create_run(req: RunRequest):
 
     workspace = _resolve_workspace(req.workspace, _settings())
 
-    # Auto-approve if requested
-    approvals = {}
+    # Do not trust approve_all=true as a production authorization mechanism
     if req.approve_all:
-        for n in ir.nodes:
-            if n.type == "approval":
-                approvals[n.id] = f"approved:{n.id}"
+        raise HTTPException(
+            status_code=400,
+            detail="approve_all=true is rejected. It is not a permitted production authorization mechanism. Explicit per-node approval tokens are required."
+        )
 
     try:
         run = execute_ir(
@@ -215,7 +234,6 @@ def create_run(req: RunRequest):
             req.inputs,
             workspace=workspace,
             idempotency_key=req.idempotency_key,
-            pending_approvals=approvals,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -244,21 +262,21 @@ def approve_run(run_id: str, req: ApproveRequest):
     if run.state != RunState.NEEDS_APPROVAL:
         raise HTTPException(status_code=409, detail=f"Run is not awaiting approval (state={run.state.value})")
 
-    # Re-execute with approval token injected
+    from skillvm.runtime import resume_run
+    from skillvm.tools import PermissionError_
     try:
-        ir_dict = {n.id: n for n in run.node_records}  # we need the original IR
-    except Exception:
-        pass
+        resumed = resume_run(run, req.node_id, req.token)
+    except PermissionError_ as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    # The run record doesn't store the IR — client must re-POST /runs with approval.
-    # Return 409 with guidance.
-    raise HTTPException(
-        status_code=409,
-        detail=(
-            f"To approve node '{req.node_id}', re-POST /runs with the same IR+inputs "
-            f"and add approve_all=true or inject the token via inputs."
-        ),
-    )
+    with _LOCK:
+        _RUNS[run_id] = resumed
+
+    return _run_to_response(resumed)
 
 
 # ---------------------------------------------------------------------------

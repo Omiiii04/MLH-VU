@@ -5,6 +5,7 @@ import dataclasses
 import json
 import pytest
 from pathlib import Path
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 import skillvm.server as server_module
@@ -201,3 +202,58 @@ def test_run_absolute_path_rejected():
 def test_ui_returns_html():
     r = client.get("/")
     assert r.status_code == 200
+
+
+def test_run_approve_all_rejected(tmp_path):
+    """approve_all=true is rejected with 400 as an unpermitted production mechanism."""
+    ws, ws_name, settings = _make_root_with_workspace(tmp_path)
+    cr = client.post("/compile", json={"source": VALID_SKILL})
+    ir = cr.json()["ir"]
+    with patch.object(server_module, "_SETTINGS", settings):
+        r = client.post("/runs", json={"ir": ir, "inputs": {}, "workspace": ws_name, "approve_all": True})
+        assert r.status_code == 400
+        assert "approve_all" in r.json()["detail"].lower()
+
+
+def test_run_approval_and_resumption_api(tmp_path):
+    """Workflow requiring approval pauses, returns token, and resumes cleanly."""
+    ws, ws_name, settings = _make_root_with_workspace(tmp_path)
+    (ws / "in.txt").write_text("hello")
+
+    approval_skill = """\
+---
+id: srv-approval
+inputs:
+  - name: p
+    type: string
+permissions: [fs.read, fs.write]
+effect_overrides:
+  fs.write: irreversible
+---
+# Srv approval
+## Steps
+1. Write done to `p` with fs.write
+"""
+    cr = client.post("/compile", json={"source": approval_skill})
+    ir = cr.json()["ir"]
+    assert ir is not None
+
+    # Patch server_module._SETTINGS to use our test root
+    with patch.object(server_module, "_SETTINGS", settings):
+        r = client.post("/runs", json={"ir": ir, "inputs": {"p": "done.txt"}, "workspace": ws_name})
+        assert r.status_code == 202
+        data = r.json()
+        assert data["state"] == "NEEDS_APPROVAL"
+        assert len(data["pending_approvals"]) > 0
+        node_id, token = next(iter(data["pending_approvals"].items()))
+
+        # Wrong token is rejected with 403
+        r_bad = client.post(f"/runs/{data['run_id']}/approve", json={"node_id": node_id, "token": "wrong_token"})
+        assert r_bad.status_code == 403
+
+        # Correct token resumes the run
+        r_good = client.post(f"/runs/{data['run_id']}/approve", json={"node_id": node_id, "token": token})
+        assert r_good.status_code == 200
+        assert r_good.json()["state"] != "NEEDS_APPROVAL"
+        assert (ws / "done.txt").exists()
+

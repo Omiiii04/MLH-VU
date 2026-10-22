@@ -1,10 +1,11 @@
-"""Ground truth: the input file was intentionally missing.
-Success = the runtime correctly failed (did NOT produce a spurious output file).
-Never treat a missing ground-truth checker as success."""
+"""Ground truth: 10-missing-source.
+
+The input source file is intentionally missing.
+The copy task cannot legitimately succeed. Claiming success is a false success.
+"""
 from pathlib import Path
 
-def check(workspace):
-    # Source does not exist -> runtime must FAIL and output must NOT be produced.
-    out = Path(workspace) / "out.json"
-    # Correct behavior: output does not exist (read failed, nothing written).
-    return not out.exists()
+
+def check(workspace: Path | str) -> bool:
+    return False
+

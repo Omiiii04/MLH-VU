@@ -1,31 +1,252 @@
 {
-  "_note": "Deterministic evaluation over 15-skill corpus. Baseline is a deterministic parser (NOT an LLM agent). LLM baseline not yet executed (no provider configured). See README for how to run.",
-  "corpus": "eval/corpus",
+  "corpus": "eval\\corpus",
   "n_per_skill": 1,
   "n_skills": 15,
-  "llm_baseline_executed": false,
-  "baseline_type": "deterministic_parser",
-  "baseline_disclaimer": "The baseline is a deterministic step parser that reuses SkillVM helpers. It is NOT an LLM agent. Do not cite this comparison as evidence that compiled workflows improve LLM agent reliability. A genuine LLM baseline requires a real configured provider (see README: Running the LLM evaluation).",
   "arms": {
     "skillvm": {
       "n": 15,
       "n_with_ground_truth": 15,
-      "task_success_rate": 0.6,
+      "n_unknown": 0,
+      "n_errors": 1,
+      "task_success_rate": 0.26666666666666666,
       "false_success_rate": 0.0,
       "verified_success_rate": 0.13333333333333333,
+      "claimed_success_rate": 0.13333333333333333,
       "error_rate": 0.06666666666666667,
-      "mean_duration": 0.0032577000000552896,
-      "per_skill": {}
+      "mean_duration": 0.004865060001126646,
+      "providers": [],
+      "models": [],
+      "per_skill": {
+        "eval-copy-json": {
+          "n": 1,
+          "task_success": 1,
+          "false_success": 0,
+          "verified_success": 1,
+          "claimed_success": 1
+        },
+        "02-malformed": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 0,
+          "verified_success": 0,
+          "claimed_success": 0
+        },
+        "eval-perm-violation": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 0,
+          "verified_success": 0,
+          "claimed_success": 0
+        },
+        "eval-verify-catch": {
+          "n": 1,
+          "task_success": 1,
+          "false_success": 0,
+          "verified_success": 1,
+          "claimed_success": 1
+        },
+        "eval-field-pick": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 0,
+          "verified_success": 0,
+          "claimed_success": 0
+        },
+        "eval-schema-validate": {
+          "n": 1,
+          "task_success": 1,
+          "false_success": 0,
+          "verified_success": 0,
+          "claimed_success": 0
+        },
+        "eval-schema-validate-fail": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 0,
+          "verified_success": 0,
+          "claimed_success": 0
+        },
+        "eval-file-list": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 0,
+          "verified_success": 0,
+          "claimed_success": 0
+        },
+        "eval-field-merge": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 0,
+          "verified_success": 0,
+          "claimed_success": 0
+        },
+        "eval-missing-source": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 0,
+          "verified_success": 0,
+          "claimed_success": 0
+        },
+        "eval-checksum": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 0,
+          "verified_success": 0,
+          "claimed_success": 0
+        },
+        "eval-bad-json": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 0,
+          "verified_success": 0,
+          "claimed_success": 0
+        },
+        "eval-path-traversal": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 0,
+          "verified_success": 0,
+          "claimed_success": 0
+        },
+        "eval-multi-step-chain": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 0,
+          "verified_success": 0,
+          "claimed_success": 0
+        },
+        "eval-schema-unchanged": {
+          "n": 1,
+          "task_success": 1,
+          "false_success": 0,
+          "verified_success": 0,
+          "claimed_success": 0
+        }
+      }
     },
     "baseline": {
       "n": 15,
-      "n_with_ground_truth": 14,
-      "task_success_rate": 0.5,
-      "false_success_rate": 0.42857142857142855,
+      "n_with_ground_truth": 15,
+      "n_unknown": 0,
+      "n_errors": 0,
+      "task_success_rate": 0.13333333333333333,
+      "false_success_rate": 0.7333333333333333,
       "verified_success_rate": 0.0,
+      "claimed_success_rate": 0.8666666666666667,
       "error_rate": 0.0,
-      "mean_duration": 0.0022888533339331238,
-      "per_skill": {}
+      "mean_duration": 0.0005237333331024274,
+      "providers": [],
+      "models": [],
+      "per_skill": {
+        "01-copy-json": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 0,
+          "verified_success": 0,
+          "claimed_success": 0
+        },
+        "02-malformed": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 1,
+          "verified_success": 0,
+          "claimed_success": 1
+        },
+        "03-permission-violation": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 0,
+          "verified_success": 0,
+          "claimed_success": 0
+        },
+        "04-verify-catch": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 1,
+          "verified_success": 0,
+          "claimed_success": 1
+        },
+        "05-field-pick": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 1,
+          "verified_success": 0,
+          "claimed_success": 1
+        },
+        "06-schema-validate": {
+          "n": 1,
+          "task_success": 1,
+          "false_success": 0,
+          "verified_success": 0,
+          "claimed_success": 1
+        },
+        "07-schema-validate-fail": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 1,
+          "verified_success": 0,
+          "claimed_success": 1
+        },
+        "08-file-list": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 1,
+          "verified_success": 0,
+          "claimed_success": 1
+        },
+        "09-field-merge": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 1,
+          "verified_success": 0,
+          "claimed_success": 1
+        },
+        "10-missing-source": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 1,
+          "verified_success": 0,
+          "claimed_success": 1
+        },
+        "11-checksum": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 1,
+          "verified_success": 0,
+          "claimed_success": 1
+        },
+        "12-bad-json": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 1,
+          "verified_success": 0,
+          "claimed_success": 1
+        },
+        "13-path-traversal": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 1,
+          "verified_success": 0,
+          "claimed_success": 1
+        },
+        "14-multi-step-chain": {
+          "n": 1,
+          "task_success": 0,
+          "false_success": 1,
+          "verified_success": 0,
+          "claimed_success": 1
+        },
+        "15-schema-unchanged": {
+          "n": 1,
+          "task_success": 1,
+          "false_success": 0,
+          "verified_success": 0,
+          "claimed_success": 1
+        }
+      }
     }
-  }
+  },
+  "baseline_type": "deterministic_parser",
+  "baseline_disclaimer": "The offline baseline is a deterministic step parser reusing SkillVM helpers without IR/verification. The LLM baseline (when executed) is a genuine multi-turn raw-skill prompt loop using the configured provider.",
+  "llm_baseline_executed": false
 }
