@@ -2,287 +2,1266 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SkillVM — Skill Compiler & Runtime</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>SkillVM — Compiler & Runtime</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    /* ── Apple Design Tokens & CSS Reset ── */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
     :root {
-      --bg:        #0d0f14;
-      --surface:   #13161e;
-      --surface2:  #1a1e29;
-      --border:    #252a38;
-      --border2:   #2e3447;
-      --text:      #e2e6f0;
-      --muted:     #6b7590;
-      --accent:    #5b6eff;
-      --accent2:   #7c8fff;
-      --green:     #22c55e;
-      --yellow:    #eab308;
-      --red:       #ef4444;
-      --orange:    #f97316;
-      --radius:    10px;
-      --font-mono: 'JetBrains Mono', monospace;
+      /* Apple Dark Palette */
+      --bg-base:            #07090e;
+      --bg-surface:         rgba(18, 22, 32, 0.72);
+      --bg-surface-elevated: rgba(26, 32, 46, 0.82);
+      --bg-card:            rgba(22, 27, 40, 0.6);
+      --bg-subtle:          rgba(255, 255, 255, 0.04);
+      --bg-subtle-hover:    rgba(255, 255, 255, 0.08);
+      --bg-subtle-active:   rgba(255, 255, 255, 0.12);
+
+      --border-hairline:    rgba(255, 255, 255, 0.08);
+      --border-light:       rgba(255, 255, 255, 0.14);
+      --border-focus:       rgba(10, 132, 255, 0.55);
+
+      --text-primary:       #f5f5f7;
+      --text-secondary:     #a1a1a6;
+      --text-tertiary:      #6e6e73;
+      --text-muted:         #48484a;
+
+      /* Apple System Accent Colors */
+      --apple-blue:         #0a84ff;
+      --apple-blue-hover:   #2b93ff;
+      --apple-blue-soft:    rgba(10, 132, 255, 0.15);
+      --apple-green:        #30d158;
+      --apple-green-soft:   rgba(48, 209, 88, 0.15);
+      --apple-yellow:       #ffd60a;
+      --apple-yellow-soft:  rgba(255, 214, 10, 0.15);
+      --apple-orange:       #ff9f0a;
+      --apple-orange-soft:  rgba(255, 159, 10, 0.15);
+      --apple-red:          #ff453a;
+      --apple-red-soft:     rgba(255, 69, 58, 0.15);
+      --apple-purple:       #bf5af2;
+      --apple-purple-soft:  rgba(191, 90, 242, 0.15);
+
+      /* Typography */
+      --font-system: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", -system-ui, sans-serif;
+      --font-mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, Monaco, monospace;
+
+      /* Motion */
+      --spring-smooth: cubic-bezier(0.16, 1, 0.3, 1);
+      --spring-snappy: cubic-bezier(0.2, 0.9, 0.3, 1);
+      --duration-fast: 120ms;
+      --duration-normal: 220ms;
+      --duration-fluid: 380ms;
+
+      /* Glassmorphism & Depth */
+      --glass-blur: blur(28px) saturate(190%);
+      --glass-bevel: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      --glass-shadow: 0 16px 36px -6px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      --card-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.35);
+
+      /* Spacing Scale (8pt grid) */
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 20px;
+      --space-6: 24px;
+      --space-8: 32px;
+
+      /* Radii */
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --radius-full: 9999px;
     }
 
-    html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; font-size: 14px; line-height: 1.6; }
+    html, body {
+      min-height: 100dvh;
+      height: 100dvh;
+      background-color: var(--bg-base);
+      color: var(--text-primary);
+      font-family: var(--font-system);
+      font-size: 13.5px;
+      line-height: 1.5;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      scroll-padding-block-start: 60px;
+      overflow: hidden;
+    }
 
-    /* ── Layout ── */
-    .app { display: grid; grid-template-rows: 56px 1fr; height: 100vh; }
+    /* ── App Container ── */
+    .app {
+      display: grid;
+      grid-template-rows: 56px minmax(0, 1fr);
+      height: 100dvh;
+      max-width: 100%;
+      background: radial-gradient(circle at 10% 0%, rgba(10, 132, 255, 0.06), transparent 45%),
+                  radial-gradient(circle at 90% 100%, rgba(191, 90, 242, 0.04), transparent 50%),
+                  var(--bg-base);
+    }
 
+    /* ── Translucent Sticky Header ── */
     header {
-      display: flex; align-items: center; gap: 16px;
-      padding: 0 24px; border-bottom: 1px solid var(--border);
-      background: var(--surface);
+      display: flex;
+      align-items: center;
+      gap: var(--space-4);
+      padding-inline: max(var(--space-5), env(safe-area-inset-left));
+      padding-block: 0;
+      background: var(--bg-surface);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border-block-end: 1px solid var(--border-hairline);
+      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2), var(--glass-bevel);
+      z-index: 100;
+      position: relative;
     }
-    .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; letter-spacing: -.3px; }
-    .logo svg { width: 28px; height: 28px; }
-    .logo-sub { font-weight: 400; color: var(--muted); font-size: 12px; margin-left: 4px; }
-    header nav { display: flex; gap: 4px; margin-left: auto; }
-    .tab { padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--muted); border: none; background: transparent; transition: all .15s; }
-    .tab:hover { color: var(--text); background: var(--surface2); }
-    .tab.active { color: var(--text); background: var(--surface2); border: 1px solid var(--border2); }
-    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-left: 12px; transition: background .3s; }
-    .status-dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
 
-    main { display: grid; grid-template-columns: 1fr 400px; overflow: hidden; }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      text-decoration: none;
+      color: inherit;
+      user-select: none;
+    }
 
-    /* ── Editor panel ── */
-    .editor-panel { display: flex; flex-direction: column; border-right: 1px solid var(--border); overflow: hidden; }
-    .panel-header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--surface); }
-    .panel-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
-    .panel-header .spacer { flex: 1; }
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 9px;
+      background: linear-gradient(135deg, rgba(10, 132, 255, 0.22) 0%, rgba(191, 90, 242, 0.28) 100%);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      box-shadow: 0 4px 12px rgba(10, 132, 255, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
 
-    textarea {
-      flex: 1; resize: none; background: var(--bg); color: var(--text);
-      border: none; outline: none; padding: 16px 20px;
-      font-family: var(--font-mono); font-size: 13px; line-height: 1.7;
+    .brand-icon svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    .brand-title {
+      font-weight: 600;
+      font-size: 14.5px;
+      letter-spacing: -0.02em;
+      color: var(--text-primary);
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+    }
+
+    .brand-badge {
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: -0.01em;
+      color: var(--text-tertiary);
+    }
+
+    /* ── Apple Segmented Control for Navigation ── */
+    .segmented-control {
+      display: inline-flex;
+      align-items: center;
+      background: rgba(0, 0, 0, 0.32);
+      padding: 3px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-hairline);
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+      margin-inline-start: auto;
+      gap: 2px;
+    }
+
+    .segmented-btn {
+      appearance: none;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-family: var(--font-system);
+      font-size: 12.5px;
+      font-weight: 500;
+      letter-spacing: -0.01em;
+      padding: 5px 14px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all var(--duration-fast) var(--spring-smooth);
+      outline: none;
+      white-space: nowrap;
+      user-select: none;
+    }
+
+    .segmented-btn:hover {
+      color: var(--text-primary);
+    }
+
+    .segmented-btn:active {
+      transform: scale(0.97);
+    }
+
+    .segmented-btn.active {
+      background: var(--bg-surface-elevated);
+      color: var(--text-primary);
+      font-weight: 600;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    }
+
+    /* Mobile view switcher segmented control */
+    .mobile-view-toggle {
+      display: none;
+    }
+
+    /* Health indicator pill */
+    .health-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: var(--radius-full);
+      background: var(--bg-subtle);
+      border: 1px solid var(--border-hairline);
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      user-select: none;
+    }
+
+    .health-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--apple-red);
+      box-shadow: 0 0 6px var(--apple-red-soft);
+      transition: background var(--duration-normal) ease, box-shadow var(--duration-normal) ease;
+    }
+
+    .health-dot.ok {
+      background: var(--apple-green);
+      box-shadow: 0 0 8px rgba(48, 209, 88, 0.65);
+    }
+
+    /* ── Main Layout: Fluid 2-Column Desktop, Responsive Stack on Mobile ── */
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(380px, 460px);
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    /* ── Editor Panel (Left) ── */
+    .editor-pane {
+      display: flex;
+      flex-direction: column;
+      border-inline-end: 1px solid var(--border-hairline);
+      min-width: 0;
+      height: 100%;
+      background: rgba(10, 12, 17, 0.5);
+    }
+
+    .pane-toolbar {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding-inline: var(--space-4);
+      padding-block: var(--space-2);
+      min-height: 44px;
+      background: var(--bg-surface);
+      border-block-end: 1px solid var(--border-hairline);
+      flex-shrink: 0;
+    }
+
+    .pane-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-tertiary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .pane-title svg {
+      opacity: 0.7;
+    }
+
+    .toolbar-spacer {
+      flex: 1;
+    }
+
+    .editor-wrapper {
+      position: relative;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    textarea#skill-src {
+      flex: 1;
+      width: 100%;
+      resize: none;
+      background: transparent;
+      color: var(--text-primary);
+      border: none;
+      outline: none;
+      padding: var(--space-4) var(--space-5);
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      line-height: 1.65;
       tab-size: 2;
+      box-sizing: border-box;
+      caret-color: var(--apple-blue);
+      overflow-y: auto;
     }
-    textarea::placeholder { color: var(--muted); }
 
-    /* ── Right panel ── */
-    .right-panel { display: flex; flex-direction: column; overflow: hidden; background: var(--surface); }
+    textarea#skill-src::placeholder {
+      color: var(--text-tertiary);
+    }
 
-    /* ── Section ── */
-    .section { border-bottom: 1px solid var(--border); }
-    .section-head { display: flex; align-items: center; gap: 8px; padding: 10px 16px; cursor: pointer; user-select: none; }
-    .section-head:hover { background: var(--surface2); }
-    .section-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
-    .section-badge { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 20px; background: var(--surface2); color: var(--muted); }
-    .section-badge.green { background: #16a34a22; color: var(--green); }
-    .section-badge.red { background: #dc262622; color: var(--red); }
-    .section-badge.yellow { background: #ca8a0422; color: var(--yellow); }
-    .chevron { margin-left: auto; color: var(--muted); font-size: 10px; transition: transform .2s; }
-    .section.collapsed .chevron { transform: rotate(-90deg); }
-    .section-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
-    .section.collapsed .section-body { display: none; }
+    .editor-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-inline: var(--space-4);
+      padding-block: 6px;
+      border-block-start: 1px solid var(--border-hairline);
+      background: var(--bg-surface);
+      font-size: 11px;
+      color: var(--text-tertiary);
+      user-select: none;
+    }
 
-    /* ── Form ── */
-    .field { display: flex; flex-direction: column; gap: 4px; }
-    .field label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+    .shortcut-hint {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .kbd {
+      display: inline-block;
+      padding: 1px 5px;
+      font-family: var(--font-system);
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      background: var(--bg-subtle-hover);
+      border: 1px solid var(--border-hairline);
+      border-radius: 4px;
+      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
+    }
+
+    /* ── Inspector Panel (Right) ── */
+    .inspector-pane {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-4);
+      padding: var(--space-4);
+      overflow-y: auto;
+      background: rgba(14, 18, 26, 0.45);
+      min-width: 0;
+    }
+
+    /* ── Apple-Style Section Cards ── */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--card-shadow), var(--glass-bevel);
+      overflow: hidden;
+      transition: border-color var(--duration-fast) ease, box-shadow var(--duration-normal) var(--spring-smooth);
+    }
+
+    .card:hover {
+      border-color: var(--border-light);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding-inline: var(--space-4);
+      padding-block: var(--space-3);
+      background: var(--bg-surface);
+      cursor: pointer;
+      user-select: none;
+      transition: background var(--duration-fast) ease;
+    }
+
+    .card-header:hover {
+      background: var(--bg-surface-elevated);
+    }
+
+    .card-header:active {
+      background: var(--bg-subtle-active);
+    }
+
+    .card-title {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-title svg {
+      color: var(--apple-blue);
+      opacity: 0.9;
+    }
+
+    .badge {
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: var(--radius-full);
+      background: var(--bg-subtle-hover);
+      color: var(--text-secondary);
+      letter-spacing: 0.02em;
+      transition: all var(--duration-fast) ease;
+    }
+
+    .badge.green {
+      background: var(--apple-green-soft);
+      color: var(--apple-green);
+      border: 1px solid rgba(48, 209, 88, 0.25);
+    }
+
+    .badge.yellow {
+      background: var(--apple-yellow-soft);
+      color: var(--apple-yellow);
+      border: 1px solid rgba(255, 214, 10, 0.25);
+    }
+
+    .badge.red {
+      background: var(--apple-red-soft);
+      color: var(--apple-red);
+      border: 1px solid rgba(255, 69, 58, 0.25);
+    }
+
+    .badge.blue {
+      background: var(--apple-blue-soft);
+      color: var(--apple-blue);
+      border: 1px solid rgba(10, 132, 255, 0.25);
+    }
+
+    .chevron {
+      margin-inline-start: auto;
+      color: var(--text-tertiary);
+      transition: transform var(--duration-normal) var(--spring-smooth);
+      display: flex;
+      align-items: center;
+    }
+
+    .card.collapsed .chevron {
+      transform: rotate(-90deg);
+    }
+
+    .card-body {
+      padding: var(--space-4);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3);
+    }
+
+    .card.collapsed .card-body {
+      display: none;
+    }
+
+    /* ── Form Controls & Apple Switches ── */
+    .field-group {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-2);
+    }
+
+    .field-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .field-hint {
+      font-size: 10.5px;
+      font-weight: 400;
+      text-transform: none;
+      color: var(--text-tertiary);
+    }
+
     input[type=text], input[type=number] {
-      background: var(--bg); border: 1px solid var(--border2); border-radius: 6px;
-      color: var(--text); padding: 7px 10px; font-size: 13px; outline: none;
-      font-family: var(--font-mono); transition: border .15s;
+      width: 100%;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--radius-md);
+      color: var(--text-primary);
+      padding: 8px 12px;
+      font-size: 12.5px;
+      font-family: var(--font-mono);
+      outline: none;
+      transition: border-color var(--duration-fast) ease, box-shadow var(--duration-fast) ease;
     }
-    input:focus { border-color: var(--accent); }
-    .toggle-row { display: flex; align-items: center; justify-content: space-between; }
-    .toggle-label { font-size: 13px; color: var(--text); }
-    .toggle { position: relative; width: 36px; height: 20px; }
-    .toggle input { opacity: 0; width: 0; height: 0; }
-    .toggle-slider { position: absolute; inset: 0; background: var(--border2); border-radius: 20px; cursor: pointer; transition: .2s; }
-    .toggle-slider::before { content:''; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: var(--muted); border-radius: 50%; transition: .2s; }
-    .toggle input:checked + .toggle-slider { background: var(--accent); }
-    .toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: #fff; }
 
-    /* ── Buttons ── */
-    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 7px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; transition: all .15s; }
-    .btn-primary { background: var(--accent); color: #fff; }
-    .btn-primary:hover { background: var(--accent2); }
-    .btn-primary:active { transform: scale(.97); }
-    .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border2); }
-    .btn-ghost:hover { color: var(--text); border-color: var(--border2); background: var(--surface2); }
-    .btn-danger { background: #ef444422; color: var(--red); border: 1px solid #ef444433; }
-    .btn-danger:hover { background: #ef444433; }
-    .btn:disabled { opacity: .4; cursor: not-allowed; }
-    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    input[type=text]:focus, input[type=number]:focus {
+      border-color: var(--apple-blue);
+      box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.2);
+    }
 
-    /* ── Diagnostics ── */
-    .diag { display: flex; gap: 8px; padding: 8px 10px; border-radius: 6px; background: var(--bg); border-left: 3px solid var(--border2); font-size: 12px; }
-    .diag.error { border-color: var(--red); background: #ef444410; }
-    .diag.warning { border-color: var(--yellow); background: #eab30810; }
-    .diag.info { border-color: var(--accent); background: #5b6eff10; }
-    .diag-code { font-family: var(--font-mono); font-weight: 600; color: var(--muted); flex-shrink: 0; }
-    .diag-msg { color: var(--text); }
-    .diag-sug { color: var(--muted); font-style: italic; margin-top: 2px; }
+    /* Apple-Style Toggle Switch */
+    .switch-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-hairline);
+    }
 
-    /* ── Node graph ── */
-    .node-list { display: flex; flex-direction: column; gap: 4px; }
-    .node-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); font-size: 12px; transition: border .2s; }
-    .node-item.SUCCEEDED { border-color: #22c55e44; }
-    .node-item.FAILED { border-color: #ef444444; }
-    .node-item.RUNNING { border-color: #5b6eff66; animation: pulse 1.2s infinite; }
-    .node-item.AWAITING_APPROVAL { border-color: #eab30866; }
-    .node-item.BLOCKED { border-color: #f9731666; }
-    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.6; } }
-    .node-type { font-family: var(--font-mono); font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--surface2); color: var(--muted); flex-shrink: 0; }
-    .node-id { flex: 1; font-family: var(--font-mono); color: var(--text); }
-    .node-state { font-size: 10px; font-weight: 700; flex-shrink: 0; }
-    .node-state.SUCCEEDED { color: var(--green); }
-    .node-state.FAILED, .node-state.BLOCKED { color: var(--red); }
-    .node-state.RUNNING { color: var(--accent); }
-    .node-state.AWAITING_APPROVAL { color: var(--yellow); }
-    .node-state.SKIPPED { color: var(--muted); }
-    .node-state.PENDING { color: var(--muted); }
+    .switch-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
 
-    /* ── Run status banner ── */
-    .run-banner { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
-    .run-banner.VERIFIED_SUCCESS { background: #16a34a22; color: var(--green); border: 1px solid #22c55e33; }
-    .run-banner.FAILED { background: #dc262622; color: var(--red); border: 1px solid #ef444433; }
-    .run-banner.RUNNING { background: #5b6eff18; color: var(--accent2); border: 1px solid #5b6eff33; }
-    .run-banner.NEEDS_APPROVAL { background: #ca8a0422; color: var(--yellow); border: 1px solid #eab30833; }
+    .switch-title {
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text-primary);
+    }
 
-    /* ── Inputs editor ── */
-    .inputs-grid { display: flex; flex-direction: column; gap: 6px; }
+    .switch-desc {
+      font-size: 11px;
+      color: var(--text-tertiary);
+    }
 
-    /* ── Scrollable areas ── */
-    .scroll { overflow-y: auto; }
-    .scroll::-webkit-scrollbar { width: 4px; }
-    .scroll::-webkit-scrollbar-track { background: transparent; }
-    .scroll::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+    .apple-switch {
+      position: relative;
+      width: 44px;
+      height: 26px;
+      flex-shrink: 0;
+    }
 
-    /* ── Workspace display ── */
-    .workspace-path { font-family: var(--font-mono); font-size: 11px; color: var(--muted); padding: 6px 10px; background: var(--bg); border-radius: 6px; border: 1px solid var(--border); word-break: break-all; }
+    .apple-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+      position: absolute;
+    }
 
-    /* ── JSON output ── */
-    .json-box { font-family: var(--font-mono); font-size: 11px; color: var(--muted); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
+    .slider {
+      position: absolute;
+      inset: 0;
+      background-color: rgba(255, 255, 255, 0.15);
+      border-radius: var(--radius-full);
+      cursor: pointer;
+      transition: background-color var(--duration-normal) var(--spring-smooth);
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+    }
 
-    /* ── Spinner ── */
-    .spinner { width: 14px; height: 14px; border: 2px solid var(--border2); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    .slider::before {
+      content: '';
+      position: absolute;
+      height: 20px;
+      width: 20px;
+      inset-inline-start: 3px;
+      inset-block-start: 3px;
+      background-color: #ffffff;
+      border-radius: 50%;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+      transition: transform var(--duration-normal) var(--spring-snappy);
+    }
 
-    /* ── Empty state ── */
-    .empty { text-align: center; padding: 24px; color: var(--muted); font-size: 12px; }
-    .empty-icon { font-size: 28px; margin-bottom: 8px; }
+    .apple-switch input:checked + .slider {
+      background-color: var(--apple-green);
+    }
 
-    /* ── Toast ── */
-    #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--surface2); border: 1px solid var(--border2); color: var(--text); padding: 10px 20px; border-radius: 8px; font-size: 13px; opacity: 0; transition: all .25s; pointer-events: none; z-index: 1000; white-space: nowrap; }
-    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .apple-switch input:checked + .slider::before {
+      transform: translateX(18px);
+    }
+
+    /* ── Apple Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 8px 16px;
+      border-radius: var(--radius-md);
+      border: none;
+      cursor: pointer;
+      font-family: var(--font-system);
+      font-size: 12.5px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      outline: none;
+      user-select: none;
+      transition: transform var(--duration-fast) var(--spring-smooth),
+                  background var(--duration-fast) ease,
+                  box-shadow var(--duration-fast) ease;
+    }
+
+    .btn:active {
+      transform: scale(0.97);
+    }
+
+    .btn:focus-visible {
+      box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.35);
+    }
+
+    .btn-primary {
+      background: linear-gradient(180deg, var(--apple-blue-hover) 0%, var(--apple-blue) 100%);
+      color: #ffffff;
+      box-shadow: 0 4px 14px rgba(10, 132, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    }
+
+    .btn-primary:hover {
+      background: linear-gradient(180deg, #3aa0ff 0%, var(--apple-blue-hover) 100%);
+      box-shadow: 0 6px 18px rgba(10, 132, 255, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    }
+
+    .btn-secondary {
+      background: var(--bg-subtle-hover);
+      color: var(--text-primary);
+      border: 1px solid var(--border-hairline);
+    }
+
+    .btn-secondary:hover {
+      background: var(--bg-subtle-active);
+      border-color: var(--border-light);
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-secondary);
+      border: 1px solid var(--border-hairline);
+      padding: 5px 11px;
+      font-size: 11.5px;
+      font-weight: 500;
+    }
+
+    .btn-ghost:hover {
+      color: var(--text-primary);
+      background: var(--bg-subtle-hover);
+      border-color: var(--border-light);
+    }
+
+    .btn-danger {
+      background: var(--apple-red-soft);
+      color: var(--apple-red);
+      border: 1px solid rgba(255, 69, 58, 0.25);
+    }
+
+    .btn-danger:hover {
+      background: rgba(255, 69, 58, 0.25);
+    }
+
+    .btn:disabled {
+      opacity: 0.38;
+      cursor: not-allowed;
+      transform: none !important;
+      box-shadow: none !important;
+    }
+
+    .btn-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      flex-wrap: wrap;
+    }
+
+    .btn-full {
+      width: 100%;
+    }
+
+    /* ── Diagnostics Cards ── */
+    .diag-container {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-2);
+    }
+
+    .diag-item {
+      display: flex;
+      gap: var(--space-3);
+      padding: 10px 12px;
+      border-radius: var(--radius-md);
+      font-size: 12px;
+      line-height: 1.45;
+      border: 1px solid var(--border-hairline);
+      background: var(--bg-surface);
+      box-shadow: var(--glass-bevel);
+    }
+
+    .diag-item.error {
+      border-color: rgba(255, 69, 58, 0.3);
+      background: rgba(255, 69, 58, 0.08);
+    }
+
+    .diag-item.warning {
+      border-color: rgba(255, 159, 10, 0.3);
+      background: rgba(255, 159, 10, 0.08);
+    }
+
+    .diag-item.info {
+      border-color: rgba(10, 132, 255, 0.3);
+      background: rgba(10, 132, 255, 0.08);
+    }
+
+    .diag-icon {
+      flex-shrink: 0;
+      margin-block-start: 1px;
+    }
+
+    .diag-item.error .diag-icon { color: var(--apple-red); }
+    .diag-item.warning .diag-icon { color: var(--apple-orange); }
+    .diag-item.info .diag-icon { color: var(--apple-blue); }
+
+    .diag-content {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 0;
+    }
+
+    .diag-header-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .diag-code {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: rgba(0, 0, 0, 0.3);
+      color: var(--text-primary);
+    }
+
+    .diag-msg {
+      color: var(--text-primary);
+      word-break: break-word;
+    }
+
+    .diag-suggestion {
+      color: var(--text-secondary);
+      font-size: 11px;
+      display: flex;
+      align-items: flex-start;
+      gap: 4px;
+      margin-block-start: 2px;
+    }
+
+    /* ── Execution Banner & Nodes ── */
+    .status-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-3);
+      padding: 10px 14px;
+      border-radius: var(--radius-md);
+      font-size: 12.5px;
+      font-weight: 600;
+      border: 1px solid var(--border-hairline);
+      box-shadow: var(--glass-bevel);
+    }
+
+    .status-banner.VERIFIED_SUCCESS {
+      background: var(--apple-green-soft);
+      color: var(--apple-green);
+      border-color: rgba(48, 209, 88, 0.3);
+    }
+
+    .status-banner.FAILED {
+      background: var(--apple-red-soft);
+      color: var(--apple-red);
+      border-color: rgba(255, 69, 58, 0.3);
+    }
+
+    .status-banner.RUNNING {
+      background: var(--apple-blue-soft);
+      color: var(--apple-blue);
+      border-color: rgba(10, 132, 255, 0.3);
+    }
+
+    .status-banner.NEEDS_APPROVAL {
+      background: var(--apple-yellow-soft);
+      color: var(--apple-yellow);
+      border-color: rgba(255, 214, 10, 0.3);
+    }
+
+    /* Nodes List */
+    .node-list {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-2);
+    }
+
+    .node-item {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: 8px 12px;
+      border-radius: var(--radius-md);
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--border-hairline);
+      font-size: 12px;
+      transition: all var(--duration-fast) var(--spring-smooth);
+    }
+
+    .node-item.SUCCEEDED {
+      border-color: rgba(48, 209, 88, 0.3);
+    }
+
+    .node-item.FAILED {
+      border-color: rgba(255, 69, 58, 0.35);
+      background: rgba(255, 69, 58, 0.05);
+    }
+
+    .node-item.RUNNING {
+      border-color: rgba(10, 132, 255, 0.45);
+      background: rgba(10, 132, 255, 0.06);
+      animation: pulse-ring 1.6s infinite var(--spring-smooth);
+    }
+
+    .node-item.AWAITING_APPROVAL {
+      border-color: rgba(255, 214, 10, 0.45);
+      background: rgba(255, 214, 10, 0.06);
+    }
+
+    @keyframes pulse-ring {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.85; transform: scale(0.995); }
+    }
+
+    .node-type-tag {
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--bg-subtle-hover);
+      color: var(--text-secondary);
+      flex-shrink: 0;
+    }
+
+    .node-id-label {
+      flex: 1;
+      font-family: var(--font-mono);
+      color: var(--text-primary);
+      font-size: 11.5px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .node-status-text {
+      font-size: 10.5px;
+      font-weight: 700;
+      flex-shrink: 0;
+      letter-spacing: 0.02em;
+    }
+
+    .node-status-text.SUCCEEDED { color: var(--apple-green); }
+    .node-status-text.FAILED { color: var(--apple-red); }
+    .node-status-text.RUNNING { color: var(--apple-blue); }
+    .node-status-text.AWAITING_APPROVAL { color: var(--apple-yellow); }
+    .node-status-text.SKIPPED, .node-status-text.PENDING { color: var(--text-tertiary); }
+
+    /* Approval Action Box */
+    .approval-card {
+      padding: 12px 14px;
+      border-radius: var(--radius-md);
+      background: rgba(255, 214, 10, 0.08);
+      border: 1px solid rgba(255, 214, 10, 0.3);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .approval-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--apple-yellow);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .approval-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .approval-row input {
+      flex: 1;
+    }
+
+    /* JSON Box */
+    .json-preview {
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      line-height: 1.55;
+      color: var(--text-secondary);
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--radius-md);
+      padding: 12px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 280px;
+      overflow-y: auto;
+    }
+
+    /* ── Apple Spinner ── */
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255, 255, 255, 0.25);
+      border-top-color: #ffffff;
+      border-radius: 50%;
+      animation: spin 0.65s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ── Custom Scrollbar (macOS Style) ── */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.22);
+    }
+
+    /* ── Apple Floating Toast HUD ── */
+    #toast {
+      position: fixed;
+      bottom: max(24px, env(safe-area-inset-bottom));
+      left: 50%;
+      transform: translateX(-50%) translateY(24px) scale(0.95);
+      background: var(--bg-surface-elevated);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border: 1px solid var(--border-light);
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5), var(--glass-bevel);
+      color: var(--text-primary);
+      padding: 9px 18px;
+      border-radius: var(--radius-full);
+      font-size: 12.5px;
+      font-weight: 500;
+      opacity: 0;
+      transition: all var(--duration-fluid) var(--spring-smooth);
+      pointer-events: none;
+      z-index: 1000;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0) scale(1);
+    }
+
+    /* ── Responsive Adaptations (Hold Structure Until It Breaks) ── */
+    @media (max-width: 880px) {
+      .app {
+        grid-template-rows: 56px minmax(0, 1fr);
+      }
+
+      .mobile-view-toggle {
+        display: inline-flex;
+      }
+
+      main {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr;
+      }
+
+      .editor-pane {
+        display: flex;
+      }
+
+      .inspector-pane {
+        display: none;
+      }
+
+      /* When inspecting tab is selected on mobile */
+      main.show-inspector .editor-pane {
+        display: none;
+      }
+
+      main.show-inspector .inspector-pane {
+        display: flex;
+      }
+    }
+
+    /* ── Accessibility & User Preferences ── */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+      .node-item.RUNNING {
+        animation: none;
+      }
+      .btn:active, .segmented-btn:active {
+        transform: none;
+      }
+    }
+
+    @media (prefers-reduced-transparency: reduce) {
+      :root {
+        --bg-surface: #121620;
+        --bg-surface-elevated: #1a202e;
+        --bg-card: #161b28;
+        --glass-blur: none;
+      }
+      header, .card, #toast {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+      }
+    }
   </style>
 </head>
 <body>
 <div class="app">
+  <!-- ── Translucent Sticky Header ── -->
   <header>
-    <div class="logo">
-      <svg viewBox="0 0 28 28" fill="none">
-        <rect width="28" height="28" rx="6" fill="#5b6eff" opacity=".15"/>
-        <path d="M7 8l5 6-5 6" stroke="#5b6eff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M15 19h6" stroke="#5b6eff" stroke-width="2" stroke-linecap="round"/>
-      </svg>
-      SkillVM <span class="logo-sub">compiler + runtime</span>
+    <a href="#" class="brand" title="SkillVM Compiler & Runtime">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="4 17 10 11 4 5"></polyline>
+          <line x1="12" y1="19" x2="20" y2="19"></line>
+        </svg>
+      </div>
+      <div class="brand-title">
+        SkillVM
+        <span class="brand-badge">compiler &amp; runtime</span>
+      </div>
+    </a>
+
+    <!-- Mobile View Switcher (Visible on <=880px) -->
+    <div class="segmented-control mobile-view-toggle" id="mobile-toggle">
+      <button class="segmented-btn active" onclick="setMobileView('editor')" id="m-btn-editor">Editor</button>
+      <button class="segmented-btn" onclick="setMobileView('inspector')" id="m-btn-inspector">Inspector</button>
     </div>
-    <nav>
-      <button class="tab active" onclick="showTab('compile')" id="tab-compile">Compile</button>
-      <button class="tab" onclick="showTab('run')" id="tab-run">Run</button>
+
+    <!-- Desktop Section Navigation Tabs -->
+    <nav class="segmented-control" aria-label="Sections">
+      <button class="segmented-btn active" onclick="showTab('compile')" id="tab-compile">Compile</button>
+      <button class="segmented-btn" onclick="showTab('run')" id="tab-run">Run</button>
+      <button class="segmented-btn" onclick="showTab('ir')" id="tab-ir">IR Inspector</button>
     </nav>
-    <div class="status-dot" id="status-dot" title="API health"></div>
+
+    <!-- API Health Indicator Pill -->
+    <div class="health-pill" id="health-pill" title="Server Connection Health">
+      <div class="health-dot" id="status-dot"></div>
+      <span id="health-text">Connecting…</span>
+    </div>
   </header>
 
-  <main>
-    <!-- ── Editor ── -->
-    <div class="editor-panel">
-      <div class="panel-header">
-        <span class="panel-title">SKILL.md</span>
-        <span class="spacer"></span>
-        <button class="btn btn-ghost" style="font-size:12px;padding:5px 10px" onclick="loadExample()">Load example</button>
+  <main id="main-content">
+    <!-- ── Left: SKILL.md Editor ── -->
+    <section class="editor-pane" aria-label="Skill Source Editor">
+      <div class="pane-toolbar">
+        <span class="pane-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+          </svg>
+          SKILL.md Source
+        </span>
+        <span class="toolbar-spacer"></span>
+        <button class="btn btn-ghost" onclick="loadExample('copy-json')" title="Load Copy JSON verified workflow">Example: Copy JSON</button>
+        <button class="btn btn-ghost" onclick="loadExample('approval')" title="Load workflow requiring manual approval">Example: Irreversible</button>
+        <button class="btn btn-ghost" onclick="clearEditor()" title="Clear editor content">Clear</button>
       </div>
-      <textarea id="skill-src" placeholder="Paste your SKILL.md here…" spellcheck="false"></textarea>
-    </div>
 
-    <!-- ── Right panel ── -->
-    <div class="right-panel scroll">
+      <div class="editor-wrapper">
+        <textarea id="skill-src" placeholder="Paste your SKILL.md YAML frontmatter and markdown here…" spellcheck="false"></textarea>
+      </div>
 
-      <!-- Compile section -->
-      <div class="section" id="sec-compile">
-        <div class="section-head" onclick="toggleSection('sec-compile')">
-          <span class="section-label">Compile</span>
-          <span class="section-badge" id="compile-badge">—</span>
-          <span class="chevron">▼</span>
+      <div class="editor-footer">
+        <span id="editor-stats">0 lines · 0 chars</span>
+        <span class="shortcut-hint">
+          <span class="kbd">⌘</span> <span class="kbd">Enter</span> to Compile
+        </span>
+      </div>
+    </section>
+
+    <!-- ── Right: Inspector & Runtime Engine ── -->
+    <section class="inspector-pane" aria-label="Workflow Inspector">
+
+      <!-- 1. Compile Card -->
+      <div class="card" id="sec-compile">
+        <div class="card-header" onclick="toggleSection('sec-compile')">
+          <span class="card-title">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+              <polyline points="2 17 12 22 22 17"></polyline>
+              <polyline points="2 12 12 17 22 12"></polyline>
+            </svg>
+            Compiler
+          </span>
+          <span class="badge" id="compile-badge">READY</span>
+          <span class="chevron">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </span>
         </div>
-        <div class="section-body">
-          <div class="toggle-row">
-            <span class="toggle-label">Model-assisted (--llm)</span>
-            <label class="toggle"><input type="checkbox" id="llm-toggle"><span class="toggle-slider"></span></label>
+
+        <div class="card-body">
+          <div class="switch-row">
+            <div class="switch-info">
+              <span class="switch-title">Model-assisted Compilation</span>
+              <span class="switch-desc">Use LLM provider for flexible intent extraction</span>
+            </div>
+            <label class="apple-switch" title="Toggle Model-Assisted LLM Compilation">
+              <input type="checkbox" id="llm-toggle">
+              <span class="slider"></span>
+            </label>
           </div>
+
           <div class="btn-row">
-            <button class="btn btn-primary" id="btn-compile" onclick="doCompile()">
-              <span>Compile</span>
+            <button class="btn btn-primary btn-full" id="btn-compile" onclick="doCompile()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+              <span>Compile Workflow</span>
             </button>
           </div>
+
           <div id="compile-meta" style="display:none">
-            <div style="font-size:11px;color:var(--muted);margin-bottom:6px" id="compile-meta-text"></div>
+            <div class="badge blue" id="compile-meta-text" style="width:100%;text-align:center;padding:5px 8px;font-size:11px"></div>
           </div>
-          <div id="diag-list"></div>
+
+          <!-- Diagnostics List -->
+          <div id="diag-list" class="diag-container"></div>
         </div>
       </div>
 
-      <!-- Run section -->
-      <div class="section collapsed" id="sec-run">
-        <div class="section-head" onclick="toggleSection('sec-run')">
-          <span class="section-label">Run</span>
-          <span class="section-badge" id="run-badge">—</span>
-          <span class="chevron">▼</span>
+      <!-- 2. Run Card -->
+      <div class="card collapsed" id="sec-run">
+        <div class="card-header" onclick="toggleSection('sec-run')">
+          <span class="card-title">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polygon points="10 8 16 12 10 16 10 8"></polygon>
+            </svg>
+            Execution Runtime
+          </span>
+          <span class="badge" id="run-badge">—</span>
+          <span class="chevron">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </span>
         </div>
-        <div class="section-body">
-          <div class="field">
-            <label>Workspace path</label>
-            <input type="text" id="workspace-input" value="." placeholder="Path to workspace directory">
+
+        <div class="card-body">
+          <!-- Workspace field -->
+          <div class="field-group">
+            <label class="field-label" for="workspace-input">
+              Workspace Subdirectory
+              <span class="field-hint">Relative to server root</span>
+            </label>
+            <input type="text" id="workspace-input" value="default" placeholder="e.g. default or subfolder">
           </div>
-          <div class="field">
-            <label>Inputs</label>
-            <div id="inputs-grid" class="inputs-grid"></div>
+
+          <!-- Dynamic Workflow Inputs -->
+          <div class="field-group">
+            <label class="field-label">Workflow Inputs</label>
+            <div id="inputs-grid" class="diag-container">
+              <div style="color:var(--text-tertiary);font-size:12px;padding:4px 0">Compile a skill with inputs to configure parameters.</div>
+            </div>
           </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Auto-approve all</span>
-            <label class="toggle"><input type="checkbox" id="approve-toggle" checked><span class="toggle-slider"></span></label>
-          </div>
+
           <div class="btn-row">
-            <button class="btn btn-primary" id="btn-run" onclick="doRun()" disabled>
-              <span>Execute</span>
+            <button class="btn btn-primary btn-full" id="btn-run" onclick="doRun()" disabled>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+              <span>Execute Workflow</span>
             </button>
           </div>
+
+          <!-- Active Run Status Banner -->
           <div id="run-status"></div>
+
+          <!-- Pending Approvals Box -->
+          <div id="approval-box" style="display:none"></div>
+
+          <!-- Interactive Node Execution Graph -->
           <div id="node-list" class="node-list"></div>
+
+          <!-- Failed Evidence Box -->
           <div id="evidence-box" style="display:none">
-            <div style="font-size:11px;font-weight:600;color:var(--muted);margin:6px 0 4px">Failed evidence</div>
-            <div class="json-box" id="evidence-json"></div>
+            <div class="field-label" style="color:var(--apple-red);margin-block:4px">Failed Evidence Details</div>
+            <div class="json-preview" id="evidence-json"></div>
           </div>
         </div>
       </div>
 
-      <!-- IR section -->
-      <div class="section collapsed" id="sec-ir">
-        <div class="section-head" onclick="toggleSection('sec-ir')">
-          <span class="section-label">IR</span>
-          <span class="section-badge" id="ir-badge">—</span>
-          <span class="chevron">▼</span>
+      <!-- 3. IR Inspector Card -->
+      <div class="card collapsed" id="sec-ir">
+        <div class="card-header" onclick="toggleSection('sec-ir')">
+          <span class="card-title">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="16 18 22 12 16 6"></polyline>
+              <polyline points="8 6 2 12 8 18"></polyline>
+            </svg>
+            Intermediate Representation (IR)
+          </span>
+          <span class="badge" id="ir-badge">—</span>
+          <span class="chevron">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </span>
         </div>
-        <div class="section-body">
-          <div class="json-box" id="ir-json" style="max-height:320px"><span style="color:var(--muted)">Compile a skill to see the IR.</span></div>
+
+        <div class="card-body">
+          <div class="json-preview" id="ir-json">Compile a skill to generate and inspect the Workflow IR.</div>
           <div class="btn-row">
-            <button class="btn btn-ghost" style="font-size:12px;padding:5px 10px" onclick="copyIR()">Copy JSON</button>
+            <button class="btn btn-secondary" onclick="copyIR()">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              <span>Copy IR JSON</span>
+            </button>
           </div>
         </div>
       </div>
 
-    </div>
+    </section>
   </main>
 </div>
 
-<div id="toast"></div>
+<!-- Apple Floating Toast HUD -->
+<div id="toast" role="status" aria-live="polite">
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" id="toast-icon"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+  <span id="toast-msg">Notification</span>
+</div>
 
 <script>
   const API = '';
@@ -290,42 +1269,117 @@
   let _runId = null;
   let _pollTimer = null;
 
-  // ── Health check ──
+  // ── Character & Line Counter ──
+  const textarea = document.getElementById('skill-src');
+  const statsEl = document.getElementById('editor-stats');
+
+  function updateEditorStats() {
+    const text = textarea.value;
+    const lines = text ? text.split('\n').length : 0;
+    const chars = text.length;
+    statsEl.textContent = `${lines} ${lines === 1 ? 'line' : 'lines'} · ${chars} ${chars === 1 ? 'char' : 'chars'}`;
+  }
+  textarea.addEventListener('input', updateEditorStats);
+
+  // ── Health Check ──
   async function checkHealth() {
+    const dot = document.getElementById('status-dot');
+    const text = document.getElementById('health-text');
     try {
-      const r = await fetch(`${API}/health`);
-      document.getElementById('status-dot').className = r.ok ? 'status-dot ok' : 'status-dot';
-    } catch { document.getElementById('status-dot').className = 'status-dot'; }
+      const res = await fetch(`${API}/health`);
+      if (res.ok) {
+        const data = await res.json();
+        dot.className = 'health-dot ok';
+        text.textContent = `Online (v${data.version || '1.0'})`;
+      } else {
+        dot.className = 'health-dot';
+        text.textContent = 'Degraded';
+      }
+    } catch {
+      dot.className = 'health-dot';
+      text.textContent = 'Offline';
+    }
   }
   checkHealth();
   setInterval(checkHealth, 10000);
 
-  // ── Tabs ──
+  // ── Tabs Navigation & Scroll ──
   function showTab(tab) {
-    ['compile','run'].forEach(t => {
-      document.getElementById(`tab-${t}`).classList.toggle('active', t === tab);
+    ['compile', 'run', 'ir'].forEach(t => {
+      const el = document.getElementById(`tab-${t}`);
+      if (el) el.classList.toggle('active', t === tab);
     });
-    // Scroll right panel to the relevant section
-    const sec = tab === 'compile' ? 'sec-compile' : 'sec-run';
-    document.getElementById(sec).scrollIntoView({ behavior: 'smooth' });
+
+    const targetMap = {
+      compile: 'sec-compile',
+      run: 'sec-run',
+      ir: 'sec-ir'
+    };
+
+    const secId = targetMap[tab];
+    const secEl = document.getElementById(secId);
+    if (secEl) {
+      secEl.classList.remove('collapsed');
+      secEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    // If on mobile, automatically show inspector
+    setMobileView('inspector');
   }
 
-  // ── Sections ──
+  // ── Mobile View Toggle ──
+  function setMobileView(view) {
+    const main = document.getElementById('main-content');
+    const btnEditor = document.getElementById('m-btn-editor');
+    const btnInspector = document.getElementById('m-btn-inspector');
+
+    if (view === 'inspector') {
+      main.classList.add('show-inspector');
+      btnInspector.classList.add('active');
+      btnEditor.classList.remove('active');
+    } else {
+      main.classList.remove('show-inspector');
+      btnEditor.classList.add('active');
+      btnInspector.classList.remove('active');
+    }
+  }
+
+  // ── Section Accordion ──
   function toggleSection(id) {
     document.getElementById(id).classList.toggle('collapsed');
   }
 
-  // ── Toast ──
-  function toast(msg, dur = 2500) {
+  // ── Toast Notification ──
+  let _toastTimeout = null;
+  function toast(msg, type = 'info', dur = 2600) {
     const el = document.getElementById('toast');
-    el.textContent = msg;
+    const msgEl = document.getElementById('toast-msg');
+    const iconEl = document.getElementById('toast-icon');
+
+    msgEl.textContent = msg;
+
+    if (type === 'success') {
+      iconEl.innerHTML = '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>';
+      iconEl.style.color = 'var(--apple-green)';
+    } else if (type === 'error') {
+      iconEl.innerHTML = '<circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line>';
+      iconEl.style.color = 'var(--apple-red)';
+    } else if (type === 'warn') {
+      iconEl.innerHTML = '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>';
+      iconEl.style.color = 'var(--apple-yellow)';
+    } else {
+      iconEl.innerHTML = '<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line>';
+      iconEl.style.color = 'var(--apple-blue)';
+    }
+
     el.classList.add('show');
-    setTimeout(() => el.classList.remove('show'), dur);
+    if (_toastTimeout) clearTimeout(_toastTimeout);
+    _toastTimeout = setTimeout(() => el.classList.remove('show'), dur);
   }
 
-  // ── Example ──
-  function loadExample() {
-    document.getElementById('skill-src').value = `---
+  // ── Examples ──
+  const EXAMPLES = {
+    'copy-json': `---
 id: copy-json
 inputs:
   - name: source_path
@@ -345,20 +1399,54 @@ postconditions:
 
 # Copy JSON
 
-Copy a JSON object from one file to another.
+Copy a validated JSON document from source to destination.
 
 ## Steps
 1. Read \`source_path\` with fs.read
 2. Parse the file with json.parse
 3. Write the object to \`dest_path\` with fs.write
-`;
-    toast('Example loaded');
+`,
+    'approval': `---
+id: purge-temp-cache
+inputs:
+  - name: target_pattern
+    type: string
+permissions: [fs.delete, verify.run]
+postconditions:
+  - kind: file_exists
+    path: "audit.log"
+---
+
+# Purge Cache
+
+Irreversible cache deletion requiring explicit approval token.
+
+## Steps
+1. Delete files matching \`target_pattern\` using fs.delete
+`
+  };
+
+  function loadExample(key) {
+    if (EXAMPLES[key]) {
+      textarea.value = EXAMPLES[key];
+      updateEditorStats();
+      toast(`Loaded "${key}" workflow template`, 'info');
+    }
+  }
+
+  function clearEditor() {
+    textarea.value = '';
+    updateEditorStats();
+    toast('Editor cleared');
   }
 
   // ── Compile ──
   async function doCompile() {
-    const src = document.getElementById('skill-src').value.trim();
-    if (!src) { toast('Paste a SKILL.md first'); return; }
+    const src = textarea.value.trim();
+    if (!src) {
+      toast('Paste or load a SKILL.md first', 'warn');
+      return;
+    }
 
     const btn = document.getElementById('btn-compile');
     btn.disabled = true;
@@ -367,174 +1455,310 @@ Copy a JSON object from one file to another.
     document.getElementById('btn-run').disabled = true;
     document.getElementById('diag-list').innerHTML = '';
     document.getElementById('compile-meta').style.display = 'none';
-    document.getElementById('ir-json').innerHTML = '<span style="color:var(--muted)">Compiling…</span>';
-    setBadge('compile-badge', '…', '');
+    document.getElementById('ir-json').innerHTML = '<span style="color:var(--text-tertiary)">Compiling workflow…</span>';
+    setBadge('compile-badge', 'COMPILING', 'blue');
 
     try {
       const llm = document.getElementById('llm-toggle').checked;
       const res = await fetch(`${API}/compile`, {
         method: 'POST',
-        headers: {'Content-Type':'application/json'},
+        headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ source: src, llm })
       });
       const data = await res.json();
 
-      // Status badge
       const badgeCls = data.status === 'COMPILED' ? 'green' : data.status === 'NEEDS_REVIEW' ? 'yellow' : 'red';
       setBadge('compile-badge', data.status, badgeCls);
 
-      // Meta
-      if (data.provider) {
-        document.getElementById('compile-meta').style.display = '';
+      if (data.provider || data.model) {
+        const metaBox = document.getElementById('compile-meta');
+        metaBox.style.display = '';
         document.getElementById('compile-meta-text').textContent =
-          `Provider: ${data.provider} · Model: ${data.model} · Mode: ${data.constrained_mode}`;
+          `Engine: ${data.provider || 'local'} · Model: ${data.model || 'deterministic'} · Mode: ${data.constrained_mode || 'strict'}`;
       }
 
-      // Diagnostics
+      // Render Diagnostics
       const diagList = document.getElementById('diag-list');
+      diagList.innerHTML = '';
       (data.diagnostics || []).forEach(d => {
-        const el = document.createElement('div');
-        el.className = `diag ${d.severity}`;
-        el.innerHTML = `<span class="diag-code">${d.code}</span><div><div class="diag-msg">${d.message}</div>${d.suggestion ? `<div class="diag-sug">💡 ${d.suggestion}</div>` : ''}</div>`;
-        diagList.appendChild(el);
+        const item = document.createElement('div');
+        item.className = `diag-item ${d.severity}`;
+        const iconSvg = d.severity === 'error'
+          ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>'
+          : d.severity === 'warning'
+          ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>'
+          : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>';
+
+        item.innerHTML = `
+          <div class="diag-icon">${iconSvg}</div>
+          <div class="diag-content">
+            <div class="diag-header-row">
+              <span class="diag-code">${escapeHtml(d.code)}</span>
+              <span class="diag-msg">${escapeHtml(d.message)}</span>
+            </div>
+            ${d.suggestion ? `<div class="diag-suggestion"><span>💡</span> <span>${escapeHtml(d.suggestion)}</span></div>` : ''}
+          </div>
+        `;
+        diagList.appendChild(item);
       });
 
-      // IR
+      // Handle IR
       if (data.ir) {
         _ir = data.ir;
         document.getElementById('ir-json').textContent = JSON.stringify(data.ir, null, 2);
-        setBadge('ir-badge', `${data.total_steps} steps`, 'green');
-        // Build inputs form
+        setBadge('ir-badge', `${data.total_steps} STEPS`, 'green');
+
         buildInputsForm(data.ir.inputs || []);
         document.getElementById('btn-run').disabled = false;
-        // Auto-expand run section
+
         document.getElementById('sec-run').classList.remove('collapsed');
         document.getElementById('sec-ir').classList.remove('collapsed');
       } else {
-        document.getElementById('ir-json').innerHTML = '<span style="color:var(--muted)">No IR produced.</span>';
+        document.getElementById('ir-json').innerHTML = '<span style="color:var(--text-tertiary)">No IR produced.</span>';
         setBadge('ir-badge', '—', '');
       }
 
-      if (data.status === 'COMPILED') toast('✓ Compiled successfully');
-      else if (data.status === 'NEEDS_REVIEW') toast('⚠ Needs review — check diagnostics');
-      else toast('✗ Compile rejected');
+      if (data.status === 'COMPILED') toast('Compiled successfully', 'success');
+      else if (data.status === 'NEEDS_REVIEW') toast('Requires human review — check diagnostics', 'warn');
+      else toast('Compilation rejected', 'error');
 
-    } catch(e) {
+    } catch (e) {
       setBadge('compile-badge', 'ERROR', 'red');
-      toast('API error: ' + e.message);
+      toast('API error: ' + e.message, 'error');
     } finally {
       btn.disabled = false;
-      btn.innerHTML = '<span>Compile</span>';
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Compile Workflow</span>';
     }
   }
 
   function buildInputsForm(inputs) {
     const grid = document.getElementById('inputs-grid');
     grid.innerHTML = '';
+    if (!inputs.length) {
+      grid.innerHTML = '<div style="color:var(--text-tertiary);font-size:12px">No inputs required for this workflow.</div>';
+      return;
+    }
+
     inputs.forEach(inp => {
-      const row = document.createElement('div');
-      row.className = 'field';
-      row.innerHTML = `<label>${inp.name} <span style="color:var(--muted);font-weight:400">(${inp.type})</span></label>
-        <input type="text" id="inp-${inp.name}" placeholder="${inp.name}" data-inp="${inp.name}">`;
-      grid.appendChild(row);
+      const field = document.createElement('div');
+      field.className = 'field-group';
+      field.innerHTML = `
+        <label class="field-label" for="inp-${escapeHtml(inp.name)}">
+          ${escapeHtml(inp.name)}
+          <span class="field-hint">(${escapeHtml(inp.type || 'string')})</span>
+        </label>
+        <input type="text" id="inp-${escapeHtml(inp.name)}" placeholder="Value for ${escapeHtml(inp.name)}" data-inp="${escapeHtml(inp.name)}" value="${inp.default !== undefined ? escapeHtml(inp.default) : ''}">
+      `;
+      grid.appendChild(field);
     });
-    if (!inputs.length) grid.innerHTML = '<div style="color:var(--muted);font-size:12px">No inputs defined.</div>';
   }
 
-  // ── Run ──
+  // ── Run Execution ──
   async function doRun() {
-    if (!_ir) { toast('Compile first'); return; }
+    if (!_ir) {
+      toast('Compile a workflow first', 'warn');
+      return;
+    }
 
     const btn = document.getElementById('btn-run');
     btn.disabled = true;
-    btn.innerHTML = '<div class="spinner"></div><span>Running…</span>';
+    btn.innerHTML = '<div class="spinner"></div><span>Executing…</span>';
     document.getElementById('run-status').innerHTML = '';
     document.getElementById('node-list').innerHTML = '';
+    document.getElementById('approval-box').style.display = 'none';
     document.getElementById('evidence-box').style.display = 'none';
-    setBadge('run-badge', '…', '');
+    setBadge('run-badge', 'RUNNING', 'blue');
     clearPoll();
 
-    // Collect inputs
     const inputs = {};
     document.querySelectorAll('[data-inp]').forEach(el => {
       inputs[el.dataset.inp] = el.value;
     });
 
     try {
-      const ws = document.getElementById('workspace-input').value.trim() || '.';
-      const approveAll = document.getElementById('approve-toggle').checked;
+      const rawWs = document.getElementById('workspace-input').value.trim();
+      const ws = (!rawWs || rawWs === '.') ? 'default' : rawWs;
+
       const res = await fetch(`${API}/runs`, {
         method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ ir: _ir, inputs, workspace: ws, approve_all: approveAll })
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          ir: _ir,
+          inputs,
+          workspace: ws,
+          approve_all: false
+        })
       });
       const data = await res.json();
-      if (!res.ok) { toast('Run error: ' + (data.detail || res.status)); return; }
+      if (!res.ok) {
+        toast('Run failed: ' + (data.detail || res.status), 'error');
+        setBadge('run-badge', 'FAILED', 'red');
+        return;
+      }
       _runId = data.run_id;
       renderRun(data);
-    } catch(e) {
-      toast('API error: ' + e.message);
+    } catch (e) {
+      toast('Run error: ' + e.message, 'error');
+      setBadge('run-badge', 'ERROR', 'red');
     } finally {
       btn.disabled = false;
-      btn.innerHTML = '<span>Execute</span>';
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Execute Workflow</span>';
     }
   }
 
   function renderRun(data) {
-    const stateCls = {
-      VERIFIED_SUCCESS: 'green', FAILED: 'red', RUNNING: '', NEEDS_APPROVAL: 'yellow'
-    }[data.state] || '';
-    setBadge('run-badge', data.state, stateCls);
+    const state = data.state;
+    const stateBadgeCls = {
+      VERIFIED_SUCCESS: 'green',
+      FAILED: 'red',
+      RUNNING: 'blue',
+      NEEDS_APPROVAL: 'yellow'
+    }[state] || '';
+    setBadge('run-badge', state, stateBadgeCls);
 
     // Banner
     const banner = document.getElementById('run-status');
-    const icons = { VERIFIED_SUCCESS: '✓', FAILED: '✗', RUNNING: '⟳', NEEDS_APPROVAL: '⚠', CANCELLED: '—' };
-    banner.innerHTML = `<div class="run-banner ${data.state}">${icons[data.state] || '·'} ${data.state}
-      <span style="font-weight:400;font-size:11px;margin-left:auto;color:inherit;opacity:.7">${data.run_id.slice(0,8)}</span>
-    </div>`;
+    const icons = {
+      VERIFIED_SUCCESS: '✓',
+      FAILED: '✕',
+      RUNNING: '⟳',
+      NEEDS_APPROVAL: '⚠'
+    };
+    banner.innerHTML = `
+      <div class="status-banner ${state}">
+        <span>${icons[state] || '•'} ${state}</span>
+        <span style="font-family:var(--font-mono);font-size:11px;opacity:0.8">${data.run_id ? data.run_id.slice(0, 8) : ''}</span>
+      </div>
+    `;
 
-    // Nodes
+    // Render Nodes
     const nl = document.getElementById('node-list');
     nl.innerHTML = '';
-    Object.entries(data.node_states || {}).forEach(([id, state]) => {
+    Object.entries(data.node_states || {}).forEach(([id, st]) => {
       const el = document.createElement('div');
-      el.className = `node-item ${state}`;
-      el.innerHTML = `<span class="node-type">${id.startsWith('in_') ? 'input' : id.startsWith('verify') ? 'verify' : id.startsWith('approve') ? 'approval' : 'tool'}</span>
-        <span class="node-id">${id}</span>
-        <span class="node-state ${state}">${state}</span>`;
+      el.className = `node-item ${st}`;
+      const typeLabel = id.startsWith('in_') ? 'input' : id.startsWith('verify') ? 'verify' : id.startsWith('approve') ? 'approval' : 'tool';
+      el.innerHTML = `
+        <span class="node-type-tag">${typeLabel}</span>
+        <span class="node-id-label" title="${escapeHtml(id)}">${escapeHtml(id)}</span>
+        <span class="node-status-text ${st}">${st}</span>
+      `;
       nl.appendChild(el);
     });
 
-    // Evidence
-    if (data.failed_evidence && data.failed_evidence.length) {
-      document.getElementById('evidence-box').style.display = '';
-      document.getElementById('evidence-json').textContent = JSON.stringify(data.failed_evidence, null, 2);
+    // Approvals Handling
+    const approvalBox = document.getElementById('approval-box');
+    const pending = data.pending_approvals || {};
+    const pendingEntries = Object.entries(pending);
+
+    if (state === 'NEEDS_APPROVAL' && pendingEntries.length > 0) {
+      approvalBox.style.display = '';
+      approvalBox.innerHTML = '';
+      pendingEntries.forEach(([nodeId, token]) => {
+        const item = document.createElement('div');
+        item.className = 'approval-card';
+        item.innerHTML = `
+          <div class="approval-header">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+            <span>Action Required: Approve Step "${escapeHtml(nodeId)}"</span>
+          </div>
+          <div class="approval-row">
+            <input type="text" id="token-${escapeHtml(nodeId)}" value="${escapeHtml(token)}" placeholder="Approval Token">
+            <button class="btn btn-primary" onclick="submitApproval('${escapeHtml(nodeId)}')">Approve &amp; Resume</button>
+          </div>
+        `;
+        approvalBox.appendChild(item);
+      });
+    } else {
+      approvalBox.style.display = 'none';
     }
 
-    if (data.state === 'VERIFIED_SUCCESS') toast('✓ Run complete — verified');
-    else if (data.state === 'FAILED') toast('✗ Run failed — check evidence');
-    else if (data.state === 'NEEDS_APPROVAL') toast('⚠ Waiting for approval');
+    // Failed Evidence
+    const evBox = document.getElementById('evidence-box');
+    if (data.failed_evidence && data.failed_evidence.length) {
+      evBox.style.display = '';
+      document.getElementById('evidence-json').textContent = JSON.stringify(data.failed_evidence, null, 2);
+    } else {
+      evBox.style.display = 'none';
+    }
+
+    if (state === 'VERIFIED_SUCCESS') toast('Workflow verified and completed', 'success');
+    else if (state === 'FAILED') toast('Execution failed — check node evidence', 'error');
+    else if (state === 'NEEDS_APPROVAL') toast('Workflow paused: awaiting authorization', 'warn');
   }
 
-  function clearPoll() { if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; } }
+  // ── Submit Approval ──
+  async function submitApproval(nodeId) {
+    if (!_runId) return;
+    const tokenInput = document.getElementById(`token-${nodeId}`);
+    const token = tokenInput ? tokenInput.value.trim() : '';
 
-  // ── IR copy ──
+    toast(`Approving step ${nodeId}…`, 'info');
+    try {
+      const res = await fetch(`${API}/runs/${_runId}/approve`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ node_id: nodeId, token })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast('Approval rejected: ' + (data.detail || res.status), 'error');
+        return;
+      }
+      renderRun(data);
+      toast('Node approved and execution resumed', 'success');
+    } catch (e) {
+      toast('Approval request failed: ' + e.message, 'error');
+    }
+  }
+
+  function clearPoll() {
+    if (_pollTimer) {
+      clearInterval(_pollTimer);
+      _pollTimer = null;
+    }
+  }
+
+  // ── Copy IR ──
   function copyIR() {
-    if (!_ir) { toast('No IR yet'); return; }
-    navigator.clipboard.writeText(JSON.stringify(_ir, null, 2)).then(() => toast('IR copied'));
+    if (!_ir) {
+      toast('No IR available yet', 'warn');
+      return;
+    }
+    navigator.clipboard.writeText(JSON.stringify(_ir, null, 2))
+      .then(() => toast('Workflow IR copied to clipboard', 'success'))
+      .catch(() => toast('Failed to copy IR to clipboard', 'error'));
   }
 
   // ── Helpers ──
   function setBadge(id, text, cls) {
     const el = document.getElementById(id);
+    if (!el) return;
     el.textContent = text;
-    el.className = `section-badge ${cls}`;
+    el.className = `badge ${cls}`;
   }
 
-  // ── Keyboard shortcuts ──
+  function escapeHtml(str) {
+    if (typeof str !== 'string') return String(str);
+    return str.replace(/[&<>"']/g, m => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+    })[m]);
+  }
+
+  // ── Keyboard Shortcuts ──
   document.addEventListener('keydown', e => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') doCompile();
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        doRun();
+      } else {
+        doCompile();
+      }
+    }
   });
+
+  // Initialize with Copy JSON example
+  loadExample('copy-json');
 </script>
 </body>
 </html>

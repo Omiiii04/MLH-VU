@@ -1,7 +1,7 @@
 # SkillVM
 
 [![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](pyproject.toml)
-[![Python](<https://img.shields.io/badge/python->=3.11-brightgreen.svg>)](pyproject.toml)
+[![Python](https://img.shields.io/badge/python-%3E3.11-brightgreen.svg)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 A compiler and deterministic runtime that turns natural-language agent skills (`SKILL.md`) into typed, verified workflows.
