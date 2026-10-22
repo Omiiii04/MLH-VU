@@ -175,5 +175,38 @@ def eval(
         typer.echo(f"  verified_success: {metrics.get('verified_success_rate', 'N/A')}")
 
 
+@app.command()
+def serve(
+    host: str = typer.Option("", "--host", "-h", help="Override bind host (default from SKILLVM_BIND)"),
+    port: int = typer.Option(0, "--port", "-p", help="Override port (default from SKILLVM_PORT)"),
+    reload: bool = typer.Option(False, "--reload", help="Hot-reload for development"),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="Open browser on start"),
+):
+    """Start the SkillVM FastAPI service."""
+    import uvicorn
+    settings = _load_settings()
+    _host = host or settings.bind
+    _port = port or settings.port
+
+    typer.echo(f"SkillVM API  ->  http://{_host}:{_port}")
+    typer.echo(f"Docs         ->  http://{_host}:{_port}/docs")
+
+    if open_browser:
+        import threading, webbrowser, time
+        def _open():
+            time.sleep(1.2)
+            webbrowser.open(f"http://{_host}:{_port}")
+        threading.Thread(target=_open, daemon=True).start()
+
+    uvicorn.run(
+        "skillvm.server:app",
+        host=_host,
+        port=_port,
+        reload=reload,
+        log_level="info",
+    )
+
+
 if __name__ == "__main__":
     app()
+

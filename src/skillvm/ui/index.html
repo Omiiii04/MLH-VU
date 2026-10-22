@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SkillVM — Skill Compiler & Runtime</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d0f14;
+      --surface:   #13161e;
+      --surface2:  #1a1e29;
+      --border:    #252a38;
+      --border2:   #2e3447;
+      --text:      #e2e6f0;
+      --muted:     #6b7590;
+      --accent:    #5b6eff;
+      --accent2:   #7c8fff;
+      --green:     #22c55e;
+      --yellow:    #eab308;
+      --red:       #ef4444;
+      --orange:    #f97316;
+      --radius:    10px;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; font-size: 14px; line-height: 1.6; }
+
+    /* ── Layout ── */
+    .app { display: grid; grid-template-rows: 56px 1fr; height: 100vh; }
+
+    header {
+      display: flex; align-items: center; gap: 16px;
+      padding: 0 24px; border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; letter-spacing: -.3px; }
+    .logo svg { width: 28px; height: 28px; }
+    .logo-sub { font-weight: 400; color: var(--muted); font-size: 12px; margin-left: 4px; }
+    header nav { display: flex; gap: 4px; margin-left: auto; }
+    .tab { padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--muted); border: none; background: transparent; transition: all .15s; }
+    .tab:hover { color: var(--text); background: var(--surface2); }
+    .tab.active { color: var(--text); background: var(--surface2); border: 1px solid var(--border2); }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-left: 12px; transition: background .3s; }
+    .status-dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+    main { display: grid; grid-template-columns: 1fr 400px; overflow: hidden; }
+
+    /* ── Editor panel ── */
+    .editor-panel { display: flex; flex-direction: column; border-right: 1px solid var(--border); overflow: hidden; }
+    .panel-header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--surface); }
+    .panel-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+    .panel-header .spacer { flex: 1; }
+
+    textarea {
+      flex: 1; resize: none; background: var(--bg); color: var(--text);
+      border: none; outline: none; padding: 16px 20px;
+      font-family: var(--font-mono); font-size: 13px; line-height: 1.7;
+      tab-size: 2;
+    }
+    textarea::placeholder { color: var(--muted); }
+
+    /* ── Right panel ── */
+    .right-panel { display: flex; flex-direction: column; overflow: hidden; background: var(--surface); }
+
+    /* ── Section ── */
+    .section { border-bottom: 1px solid var(--border); }
+    .section-head { display: flex; align-items: center; gap: 8px; padding: 10px 16px; cursor: pointer; user-select: none; }
+    .section-head:hover { background: var(--surface2); }
+    .section-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+    .section-badge { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 20px; background: var(--surface2); color: var(--muted); }
+    .section-badge.green { background: #16a34a22; color: var(--green); }
+    .section-badge.red { background: #dc262622; color: var(--red); }
+    .section-badge.yellow { background: #ca8a0422; color: var(--yellow); }
+    .chevron { margin-left: auto; color: var(--muted); font-size: 10px; transition: transform .2s; }
+    .section.collapsed .chevron { transform: rotate(-90deg); }
+    .section-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+    .section.collapsed .section-body { display: none; }
+
+    /* ── Form ── */
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+    input[type=text], input[type=number] {
+      background: var(--bg); border: 1px solid var(--border2); border-radius: 6px;
+      color: var(--text); padding: 7px 10px; font-size: 13px; outline: none;
+      font-family: var(--font-mono); transition: border .15s;
+    }
+    input:focus { border-color: var(--accent); }
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; }
+    .toggle-label { font-size: 13px; color: var(--text); }
+    .toggle { position: relative; width: 36px; height: 20px; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider { position: absolute; inset: 0; background: var(--border2); border-radius: 20px; cursor: pointer; transition: .2s; }
+    .toggle-slider::before { content:''; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: var(--muted); border-radius: 50%; transition: .2s; }
+    .toggle input:checked + .toggle-slider { background: var(--accent); }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: #fff; }
+
+    /* ── Buttons ── */
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 7px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; transition: all .15s; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent2); }
+    .btn-primary:active { transform: scale(.97); }
+    .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border2); }
+    .btn-ghost:hover { color: var(--text); border-color: var(--border2); background: var(--surface2); }
+    .btn-danger { background: #ef444422; color: var(--red); border: 1px solid #ef444433; }
+    .btn-danger:hover { background: #ef444433; }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    /* ── Diagnostics ── */
+    .diag { display: flex; gap: 8px; padding: 8px 10px; border-radius: 6px; background: var(--bg); border-left: 3px solid var(--border2); font-size: 12px; }
+    .diag.error { border-color: var(--red); background: #ef444410; }
+    .diag.warning { border-color: var(--yellow); background: #eab30810; }
+    .diag.info { border-color: var(--accent); background: #5b6eff10; }
+    .diag-code { font-family: var(--font-mono); font-weight: 600; color: var(--muted); flex-shrink: 0; }
+    .diag-msg { color: var(--text); }
+    .diag-sug { color: var(--muted); font-style: italic; margin-top: 2px; }
+
+    /* ── Node graph ── */
+    .node-list { display: flex; flex-direction: column; gap: 4px; }
+    .node-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); font-size: 12px; transition: border .2s; }
+    .node-item.SUCCEEDED { border-color: #22c55e44; }
+    .node-item.FAILED { border-color: #ef444444; }
+    .node-item.RUNNING { border-color: #5b6eff66; animation: pulse 1.2s infinite; }
+    .node-item.AWAITING_APPROVAL { border-color: #eab30866; }
+    .node-item.BLOCKED { border-color: #f9731666; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.6; } }
+    .node-type { font-family: var(--font-mono); font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--surface2); color: var(--muted); flex-shrink: 0; }
+    .node-id { flex: 1; font-family: var(--font-mono); color: var(--text); }
+    .node-state { font-size: 10px; font-weight: 700; flex-shrink: 0; }
+    .node-state.SUCCEEDED { color: var(--green); }
+    .node-state.FAILED, .node-state.BLOCKED { color: var(--red); }
+    .node-state.RUNNING { color: var(--accent); }
+    .node-state.AWAITING_APPROVAL { color: var(--yellow); }
+    .node-state.SKIPPED { color: var(--muted); }
+    .node-state.PENDING { color: var(--muted); }
+
+    /* ── Run status banner ── */
+    .run-banner { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+    .run-banner.VERIFIED_SUCCESS { background: #16a34a22; color: var(--green); border: 1px solid #22c55e33; }
+    .run-banner.FAILED { background: #dc262622; color: var(--red); border: 1px solid #ef444433; }
+    .run-banner.RUNNING { background: #5b6eff18; color: var(--accent2); border: 1px solid #5b6eff33; }
+    .run-banner.NEEDS_APPROVAL { background: #ca8a0422; color: var(--yellow); border: 1px solid #eab30833; }
+
+    /* ── Inputs editor ── */
+    .inputs-grid { display: flex; flex-direction: column; gap: 6px; }
+
+    /* ── Scrollable areas ── */
+    .scroll { overflow-y: auto; }
+    .scroll::-webkit-scrollbar { width: 4px; }
+    .scroll::-webkit-scrollbar-track { background: transparent; }
+    .scroll::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+
+    /* ── Workspace display ── */
+    .workspace-path { font-family: var(--font-mono); font-size: 11px; color: var(--muted); padding: 6px 10px; background: var(--bg); border-radius: 6px; border: 1px solid var(--border); word-break: break-all; }
+
+    /* ── JSON output ── */
+    .json-box { font-family: var(--font-mono); font-size: 11px; color: var(--muted); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
+
+    /* ── Spinner ── */
+    .spinner { width: 14px; height: 14px; border: 2px solid var(--border2); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Empty state ── */
+    .empty { text-align: center; padding: 24px; color: var(--muted); font-size: 12px; }
+    .empty-icon { font-size: 28px; margin-bottom: 8px; }
+
+    /* ── Toast ── */
+    #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--surface2); border: 1px solid var(--border2); color: var(--text); padding: 10px 20px; border-radius: 8px; font-size: 13px; opacity: 0; transition: all .25s; pointer-events: none; z-index: 1000; white-space: nowrap; }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo">
+      <svg viewBox="0 0 28 28" fill="none">
+        <rect width="28" height="28" rx="6" fill="#5b6eff" opacity=".15"/>
+        <path d="M7 8l5 6-5 6" stroke="#5b6eff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M15 19h6" stroke="#5b6eff" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      SkillVM <span class="logo-sub">compiler + runtime</span>
+    </div>
+    <nav>
+      <button class="tab active" onclick="showTab('compile')" id="tab-compile">Compile</button>
+      <button class="tab" onclick="showTab('run')" id="tab-run">Run</button>
+    </nav>
+    <div class="status-dot" id="status-dot" title="API health"></div>
+  </header>
+
+  <main>
+    <!-- ── Editor ── -->
+    <div class="editor-panel">
+      <div class="panel-header">
+        <span class="panel-title">SKILL.md</span>
+        <span class="spacer"></span>
+        <button class="btn btn-ghost" style="font-size:12px;padding:5px 10px" onclick="loadExample()">Load example</button>
+      </div>
+      <textarea id="skill-src" placeholder="Paste your SKILL.md here…" spellcheck="false"></textarea>
+    </div>
+
+    <!-- ── Right panel ── -->
+    <div class="right-panel scroll">
+
+      <!-- Compile section -->
+      <div class="section" id="sec-compile">
+        <div class="section-head" onclick="toggleSection('sec-compile')">
+          <span class="section-label">Compile</span>
+          <span class="section-badge" id="compile-badge">—</span>
+          <span class="chevron">▼</span>
+        </div>
+        <div class="section-body">
+          <div class="toggle-row">
+            <span class="toggle-label">Model-assisted (--llm)</span>
+            <label class="toggle"><input type="checkbox" id="llm-toggle"><span class="toggle-slider"></span></label>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" id="btn-compile" onclick="doCompile()">
+              <span>Compile</span>
+            </button>
+          </div>
+          <div id="compile-meta" style="display:none">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:6px" id="compile-meta-text"></div>
+          </div>
+          <div id="diag-list"></div>
+        </div>
+      </div>
+
+      <!-- Run section -->
+      <div class="section collapsed" id="sec-run">
+        <div class="section-head" onclick="toggleSection('sec-run')">
+          <span class="section-label">Run</span>
+          <span class="section-badge" id="run-badge">—</span>
+          <span class="chevron">▼</span>
+        </div>
+        <div class="section-body">
+          <div class="field">
+            <label>Workspace path</label>
+            <input type="text" id="workspace-input" value="." placeholder="Path to workspace directory">
+          </div>
+          <div class="field">
+            <label>Inputs</label>
+            <div id="inputs-grid" class="inputs-grid"></div>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Auto-approve all</span>
+            <label class="toggle"><input type="checkbox" id="approve-toggle" checked><span class="toggle-slider"></span></label>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" id="btn-run" onclick="doRun()" disabled>
+              <span>Execute</span>
+            </button>
+          </div>
+          <div id="run-status"></div>
+          <div id="node-list" class="node-list"></div>
+          <div id="evidence-box" style="display:none">
+            <div style="font-size:11px;font-weight:600;color:var(--muted);margin:6px 0 4px">Failed evidence</div>
+            <div class="json-box" id="evidence-json"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- IR section -->
+      <div class="section collapsed" id="sec-ir">
+        <div class="section-head" onclick="toggleSection('sec-ir')">
+          <span class="section-label">IR</span>
+          <span class="section-badge" id="ir-badge">—</span>
+          <span class="chevron">▼</span>
+        </div>
+        <div class="section-body">
+          <div class="json-box" id="ir-json" style="max-height:320px"><span style="color:var(--muted)">Compile a skill to see the IR.</span></div>
+          <div class="btn-row">
+            <button class="btn btn-ghost" style="font-size:12px;padding:5px 10px" onclick="copyIR()">Copy JSON</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  const API = '';
+  let _ir = null;
+  let _runId = null;
+  let _pollTimer = null;
+
+  // ── Health check ──
+  async function checkHealth() {
+    try {
+      const r = await fetch(`${API}/health`);
+      document.getElementById('status-dot').className = r.ok ? 'status-dot ok' : 'status-dot';
+    } catch { document.getElementById('status-dot').className = 'status-dot'; }
+  }
+  checkHealth();
+  setInterval(checkHealth, 10000);
+
+  // ── Tabs ──
+  function showTab(tab) {
+    ['compile','run'].forEach(t => {
+      document.getElementById(`tab-${t}`).classList.toggle('active', t === tab);
+    });
+    // Scroll right panel to the relevant section
+    const sec = tab === 'compile' ? 'sec-compile' : 'sec-run';
+    document.getElementById(sec).scrollIntoView({ behavior: 'smooth' });
+  }
+
+  // ── Sections ──
+  function toggleSection(id) {
+    document.getElementById(id).classList.toggle('collapsed');
+  }
+
+  // ── Toast ──
+  function toast(msg, dur = 2500) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), dur);
+  }
+
+  // ── Example ──
+  function loadExample() {
+    document.getElementById('skill-src').value = `---
+id: copy-json
+inputs:
+  - name: source_path
+    type: string
+  - name: dest_path
+    type: string
+permissions: [fs.read, fs.write, json.parse, verify.run]
+postconditions:
+  - kind: file_exists
+    path: "{dest_path}"
+  - kind: json_matches_schema
+    path: "{dest_path}"
+    schema:
+      type: object
+      required: [ok]
+---
+
+# Copy JSON
+
+Copy a JSON object from one file to another.
+
+## Steps
+1. Read \`source_path\` with fs.read
+2. Parse the file with json.parse
+3. Write the object to \`dest_path\` with fs.write
+`;
+    toast('Example loaded');
+  }
+
+  // ── Compile ──
+  async function doCompile() {
+    const src = document.getElementById('skill-src').value.trim();
+    if (!src) { toast('Paste a SKILL.md first'); return; }
+
+    const btn = document.getElementById('btn-compile');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div><span>Compiling…</span>';
+    _ir = null;
+    document.getElementById('btn-run').disabled = true;
+    document.getElementById('diag-list').innerHTML = '';
+    document.getElementById('compile-meta').style.display = 'none';
+    document.getElementById('ir-json').innerHTML = '<span style="color:var(--muted)">Compiling…</span>';
+    setBadge('compile-badge', '…', '');
+
+    try {
+      const llm = document.getElementById('llm-toggle').checked;
+      const res = await fetch(`${API}/compile`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ source: src, llm })
+      });
+      const data = await res.json();
+
+      // Status badge
+      const badgeCls = data.status === 'COMPILED' ? 'green' : data.status === 'NEEDS_REVIEW' ? 'yellow' : 'red';
+      setBadge('compile-badge', data.status, badgeCls);
+
+      // Meta
+      if (data.provider) {
+        document.getElementById('compile-meta').style.display = '';
+        document.getElementById('compile-meta-text').textContent =
+          `Provider: ${data.provider} · Model: ${data.model} · Mode: ${data.constrained_mode}`;
+      }
+
+      // Diagnostics
+      const diagList = document.getElementById('diag-list');
+      (data.diagnostics || []).forEach(d => {
+        const el = document.createElement('div');
+        el.className = `diag ${d.severity}`;
+        el.innerHTML = `<span class="diag-code">${d.code}</span><div><div class="diag-msg">${d.message}</div>${d.suggestion ? `<div class="diag-sug">💡 ${d.suggestion}</div>` : ''}</div>`;
+        diagList.appendChild(el);
+      });
+
+      // IR
+      if (data.ir) {
+        _ir = data.ir;
+        document.getElementById('ir-json').textContent = JSON.stringify(data.ir, null, 2);
+        setBadge('ir-badge', `${data.total_steps} steps`, 'green');
+        // Build inputs form
+        buildInputsForm(data.ir.inputs || []);
+        document.getElementById('btn-run').disabled = false;
+        // Auto-expand run section
+        document.getElementById('sec-run').classList.remove('collapsed');
+        document.getElementById('sec-ir').classList.remove('collapsed');
+      } else {
+        document.getElementById('ir-json').innerHTML = '<span style="color:var(--muted)">No IR produced.</span>';
+        setBadge('ir-badge', '—', '');
+      }
+
+      if (data.status === 'COMPILED') toast('✓ Compiled successfully');
+      else if (data.status === 'NEEDS_REVIEW') toast('⚠ Needs review — check diagnostics');
+      else toast('✗ Compile rejected');
+
+    } catch(e) {
+      setBadge('compile-badge', 'ERROR', 'red');
+      toast('API error: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<span>Compile</span>';
+    }
+  }
+
+  function buildInputsForm(inputs) {
+    const grid = document.getElementById('inputs-grid');
+    grid.innerHTML = '';
+    inputs.forEach(inp => {
+      const row = document.createElement('div');
+      row.className = 'field';
+      row.innerHTML = `<label>${inp.name} <span style="color:var(--muted);font-weight:400">(${inp.type})</span></label>
+        <input type="text" id="inp-${inp.name}" placeholder="${inp.name}" data-inp="${inp.name}">`;
+      grid.appendChild(row);
+    });
+    if (!inputs.length) grid.innerHTML = '<div style="color:var(--muted);font-size:12px">No inputs defined.</div>';
+  }
+
+  // ── Run ──
+  async function doRun() {
+    if (!_ir) { toast('Compile first'); return; }
+
+    const btn = document.getElementById('btn-run');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div><span>Running…</span>';
+    document.getElementById('run-status').innerHTML = '';
+    document.getElementById('node-list').innerHTML = '';
+    document.getElementById('evidence-box').style.display = 'none';
+    setBadge('run-badge', '…', '');
+    clearPoll();
+
+    // Collect inputs
+    const inputs = {};
+    document.querySelectorAll('[data-inp]').forEach(el => {
+      inputs[el.dataset.inp] = el.value;
+    });
+
+    try {
+      const ws = document.getElementById('workspace-input').value.trim() || '.';
+      const approveAll = document.getElementById('approve-toggle').checked;
+      const res = await fetch(`${API}/runs`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ ir: _ir, inputs, workspace: ws, approve_all: approveAll })
+      });
+      const data = await res.json();
+      if (!res.ok) { toast('Run error: ' + (data.detail || res.status)); return; }
+      _runId = data.run_id;
+      renderRun(data);
+    } catch(e) {
+      toast('API error: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<span>Execute</span>';
+    }
+  }
+
+  function renderRun(data) {
+    const stateCls = {
+      VERIFIED_SUCCESS: 'green', FAILED: 'red', RUNNING: '', NEEDS_APPROVAL: 'yellow'
+    }[data.state] || '';
+    setBadge('run-badge', data.state, stateCls);
+
+    // Banner
+    const banner = document.getElementById('run-status');
+    const icons = { VERIFIED_SUCCESS: '✓', FAILED: '✗', RUNNING: '⟳', NEEDS_APPROVAL: '⚠', CANCELLED: '—' };
+    banner.innerHTML = `<div class="run-banner ${data.state}">${icons[data.state] || '·'} ${data.state}
+      <span style="font-weight:400;font-size:11px;margin-left:auto;color:inherit;opacity:.7">${data.run_id.slice(0,8)}</span>
+    </div>`;
+
+    // Nodes
+    const nl = document.getElementById('node-list');
+    nl.innerHTML = '';
+    Object.entries(data.node_states || {}).forEach(([id, state]) => {
+      const el = document.createElement('div');
+      el.className = `node-item ${state}`;
+      el.innerHTML = `<span class="node-type">${id.startsWith('in_') ? 'input' : id.startsWith('verify') ? 'verify' : id.startsWith('approve') ? 'approval' : 'tool'}</span>
+        <span class="node-id">${id}</span>
+        <span class="node-state ${state}">${state}</span>`;
+      nl.appendChild(el);
+    });
+
+    // Evidence
+    if (data.failed_evidence && data.failed_evidence.length) {
+      document.getElementById('evidence-box').style.display = '';
+      document.getElementById('evidence-json').textContent = JSON.stringify(data.failed_evidence, null, 2);
+    }
+
+    if (data.state === 'VERIFIED_SUCCESS') toast('✓ Run complete — verified');
+    else if (data.state === 'FAILED') toast('✗ Run failed — check evidence');
+    else if (data.state === 'NEEDS_APPROVAL') toast('⚠ Waiting for approval');
+  }
+
+  function clearPoll() { if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; } }
+
+  // ── IR copy ──
+  function copyIR() {
+    if (!_ir) { toast('No IR yet'); return; }
+    navigator.clipboard.writeText(JSON.stringify(_ir, null, 2)).then(() => toast('IR copied'));
+  }
+
+  // ── Helpers ──
+  function setBadge(id, text, cls) {
+    const el = document.getElementById(id);
+    el.textContent = text;
+    el.className = `section-badge ${cls}`;
+  }
+
+  // ── Keyboard shortcuts ──
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') doCompile();
+  });
+</script>
+</body>
+</html>
