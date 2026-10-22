@@ -1,7 +1,9 @@
 """runtime.py -- dependency-aware workflow executor.
 
 Executes validated IR only. States: PENDING->READY->RUNNING->SUCCEEDED/FAILED/etc.
-A run is VERIFIED_SUCCESS only if all required verify nodes pass.
+A run is VERIFIED_SUCCESS only if every required verify node was actually executed
+and SUCCEEDED. A run with no required verify nodes (or no verify nodes at all)
+yields SUCCEEDED_UNVERIFIED, never VERIFIED_SUCCESS.
 """
 from __future__ import annotations
 
@@ -32,6 +34,9 @@ class RunState(str, Enum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
     VERIFIED_SUCCESS = "VERIFIED_SUCCESS"
+    # At least one required verify node was NOT executed (e.g. no verify nodes, or
+    # workflow completed via a path that skipped all verify nodes).
+    SUCCEEDED_UNVERIFIED = "SUCCEEDED_UNVERIFIED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
     NEEDS_APPROVAL = "NEEDS_APPROVAL"
@@ -117,6 +122,16 @@ def execute_ir(
         run.node_records[n.id] = NodeRecord(node_id=n.id)
 
     sandbox = Sandbox(workspace=workspace, authorized_root=workspace)
+
+    # Snapshot before execution so reversible failures can be rolled back.
+    _snapshot_taken = False
+    _snapshot_restored = False
+    _snapshot_restore_failed = False
+    try:
+        sandbox.snapshot()
+        _snapshot_taken = True
+    except Exception:
+        pass  # snapshot is best-effort; non-fatal
 
     # Build adjacency: node -> list of dependents; and reverse: node -> dependencies
     nmap = ir.node_map()
@@ -290,12 +305,46 @@ def execute_ir(
     if verify_failures:
         run.state = RunState.FAILED
         run.failed_evidence = verify_failures
+        # Attempt rollback of reversible filesystem changes.
+        if _snapshot_taken:
+            try:
+                sandbox.restore()
+                _snapshot_restored = True
+                run.failed_evidence.append({"snapshot": "restored"})
+            except Exception as e:
+                _snapshot_restore_failed = True
+                run.failed_evidence.append({"snapshot": "restore_failed", "error": str(e)})
     elif any(r.state in (NodeState.FAILED, NodeState.BLOCKED) for r in run.node_records.values()):
         run.state = RunState.FAILED
         failed = [r for r in run.node_records.values() if r.state in (NodeState.FAILED, NodeState.BLOCKED)]
         run.failed_evidence = [{"node": r.node_id, "error": r.error} for r in failed]
+        if _snapshot_taken:
+            try:
+                sandbox.restore()
+                _snapshot_restored = True
+                run.failed_evidence.append({"snapshot": "restored"})
+            except Exception as e:
+                _snapshot_restore_failed = True
+                run.failed_evidence.append({"snapshot": "restore_failed", "error": str(e)})
     else:
-        run.state = RunState.VERIFIED_SUCCESS
+        # Invariant: VERIFIED_SUCCESS requires >=1 required verify node to have
+        # actually executed and reached SUCCEEDED.
+        required_verify_nodes = [n for n in ir.nodes if n.type == "verify" and getattr(n, "required", True)]
+        executed_required_successes = [
+            nid for nid in (n.id for n in required_verify_nodes)
+            if run.node_records.get(nid) and run.node_records[nid].state == NodeState.SUCCEEDED
+        ]
+        if required_verify_nodes and len(executed_required_successes) == len(required_verify_nodes):
+            run.state = RunState.VERIFIED_SUCCESS
+        else:
+            # No required verify nodes executed successfully (or none exist).
+            run.state = RunState.SUCCEEDED_UNVERIFIED
+
+    if _snapshot_taken:
+        try:
+            sandbox.cleanup_snapshot()
+        except Exception:
+            pass
 
     return run
 

@@ -70,7 +70,9 @@ class CompileResponse(BaseModel):
 class RunRequest(BaseModel):
     ir: dict
     inputs: dict[str, Any] = {}
-    workspace: str = "."
+    # Relative workspace name under the configured SKILLVM_WORKSPACE_ROOT.
+    # Absolute paths and path traversal are rejected by the server.
+    workspace: str = "default"
     approve_all: bool = False
     idempotency_key: str | None = None
 
@@ -101,6 +103,54 @@ def _run_to_response(run: RunRecord) -> RunResponse:
         started_at=run.started_at,
         finished_at=run.finished_at,
     )
+
+
+def _resolve_workspace(requested: str, settings) -> Path:
+    """Resolve a client-supplied workspace name against the configured root.
+
+    Rules:
+    - The root is taken from server config (SKILLVM_WORKSPACE_ROOT), never from
+      the client request.
+    - Absolute paths in `requested` are rejected.
+    - Resolved path must be a strict descendant of the root (Path.relative_to).
+    - Symlinks must not escape the root.
+    """
+    root = settings.workspace_root.resolve()
+
+    # Reject absolute paths from client.
+    req_path = Path(requested)
+    if req_path.is_absolute():
+        raise HTTPException(status_code=400, detail="Workspace must be a relative path name, not an absolute path.")
+
+    candidate = (root / requested).resolve()
+
+    # Enforce containment — raises ValueError if candidate escapes root.
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Workspace path must remain inside the configured workspace root.")
+
+    # Symlink containment check: walk each component after the root.
+    try:
+        rel_parts = candidate.relative_to(root).parts
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Workspace path escapes workspace root.")
+    accum = root
+    for part in rel_parts:
+        accum = accum / part
+        if accum.is_symlink():
+            real = accum.resolve()
+            try:
+                real.relative_to(root)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Symlink in workspace path escapes workspace root.")
+
+    if not candidate.exists():
+        raise HTTPException(status_code=400, detail=f"Workspace not found: {requested!r}")
+    if not candidate.is_dir():
+        raise HTTPException(status_code=400, detail=f"Workspace is not a directory: {requested!r}")
+
+    return candidate
 
 
 # ---------------------------------------------------------------------------
@@ -150,9 +200,7 @@ def create_run(req: RunRequest):
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Invalid IR: {e}")
 
-    workspace = Path(req.workspace).resolve()
-    if not workspace.exists():
-        raise HTTPException(status_code=400, detail=f"Workspace not found: {workspace}")
+    workspace = _resolve_workspace(req.workspace, _settings())
 
     # Auto-approve if requested
     approvals = {}

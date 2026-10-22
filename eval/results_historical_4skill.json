@@ -1,0 +1,28 @@
+{
+  "_historical_note": "Results from 4-skill corpus (4 skills x 2 trials = 8 rows per arm). NOT from 15-skill corpus. Baseline is a deterministic parser, NOT an LLM agent. Do not cite as evidence of LLM improvement.",
+  "corpus": "eval/corpus",
+  "n_per_skill": 2,
+  "n_skills": 4,
+  "llm_baseline_executed": false,
+  "baseline_type": "deterministic_parser",
+  "arms": {
+    "skillvm": {
+      "n": 8,
+      "task_success_rate": 0.75,
+      "false_success_rate": 0.0,
+      "verified_success_rate": 0.5,
+      "error_rate": 0.25,
+      "mean_duration": 0.0016857375003382913,
+      "per_skill": {}
+    },
+    "baseline": {
+      "n": 8,
+      "task_success_rate": 0.5,
+      "false_success_rate": 0.25,
+      "verified_success_rate": 0.0,
+      "error_rate": 0.0,
+      "mean_duration": 0.002272262501719524,
+      "per_skill": {}
+    }
+  }
+}

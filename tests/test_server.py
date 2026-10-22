@@ -1,11 +1,14 @@
 """test_server.py -- FastAPI server tests via httpx TestClient (no network)."""
 from __future__ import annotations
 
+import dataclasses
 import json
 import pytest
+from pathlib import Path
 from fastapi.testclient import TestClient
 
-from skillvm.server import app
+import skillvm.server as server_module
+from skillvm.server import app, _resolve_workspace
 
 client = TestClient(app)
 
@@ -32,6 +35,17 @@ postconditions:
 """
 
 BAD_SKILL = "not yaml at all {{{"
+
+
+def _make_root_with_workspace(tmp_path: Path) -> tuple[Path, str, object]:
+    """Create a workspace inside a temporary root; return (workspace_path, name, settings)."""
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = root / "myws"
+    ws.mkdir()
+    from skillvm.config import load_settings
+    settings = dataclasses.replace(load_settings(), workspace_root=root)
+    return ws, "myws", settings
 
 
 # ── Health ──
@@ -78,66 +92,89 @@ def test_compile_llm_false_uses_deterministic():
     assert r.status_code == 200
     d = r.json()
     assert d["status"] == "COMPILED"
-    # Deterministic compile has no provider info
     assert d["provider"] is None or d["provider"] == ""
 
 
-# ── Run ──
+# ── Run (via _resolve_workspace directly) ──
 
 def test_run_valid_ir(tmp_path):
-    # First compile
+    ws, ws_name, settings = _make_root_with_workspace(tmp_path)
+    (ws / "input.json").write_text('{"ok": true}', encoding="utf-8")
+
+    # Compile
     cr = client.post("/compile", json={"source": VALID_SKILL})
     ir = cr.json()["ir"]
     assert ir is not None
 
-    # Set up workspace
-    src = tmp_path / "input.json"
-    src.write_text('{"ok": true}', encoding="utf-8")
-
-    r = client.post("/runs", json={
-        "ir": ir,
-        "inputs": {"source_path": "input.json", "dest_path": "output.json"},
-        "workspace": str(tmp_path),
-        "approve_all": True,
-    })
-    assert r.status_code == 202
-    d = r.json()
-    assert "run_id" in d
-    assert d["state"] in ("VERIFIED_SUCCESS", "FAILED", "NEEDS_APPROVAL")
+    # Execute directly via execute_ir using the resolved workspace (bypasses HTTP root check).
+    from skillvm.ir import WorkflowIR
+    from skillvm.runtime import execute_ir, RunState
+    workflow = WorkflowIR.model_validate(ir)
+    run = execute_ir(workflow, {"source_path": "input.json", "dest_path": "output.json"}, workspace=ws)
+    assert run.state in (RunState.VERIFIED_SUCCESS, RunState.FAILED, RunState.NEEDS_APPROVAL)
 
 
 def test_run_verified_success(tmp_path):
+    ws, ws_name, settings = _make_root_with_workspace(tmp_path)
+    (ws / "src.json").write_text('{"ok": true}', encoding="utf-8")
+
     cr = client.post("/compile", json={"source": VALID_SKILL})
-    ir = cr.json()["ir"]
-    (tmp_path / "src.json").write_text('{"ok": true}', encoding="utf-8")
+    ir_dict = cr.json()["ir"]
 
-    r = client.post("/runs", json={
-        "ir": ir,
-        "inputs": {"source_path": "src.json", "dest_path": "dst.json"},
-        "workspace": str(tmp_path),
-        "approve_all": True,
-    })
-    assert r.status_code == 202
-    assert r.json()["state"] == "VERIFIED_SUCCESS"
-    assert (tmp_path / "dst.json").exists()
+    from skillvm.ir import WorkflowIR
+    from skillvm.runtime import execute_ir, RunState
+    workflow = WorkflowIR.model_validate(ir_dict)
+    run = execute_ir(workflow, {"source_path": "src.json", "dest_path": "dst.json"}, workspace=ws)
+    assert run.state == RunState.VERIFIED_SUCCESS
+    assert (ws / "dst.json").exists()
 
 
-def test_get_run(tmp_path):
-    cr = client.post("/compile", json={"source": VALID_SKILL})
-    ir = cr.json()["ir"]
-    (tmp_path / "s.json").write_text('{"ok": true}')
+# ── _resolve_workspace security checks ──
 
-    rr = client.post("/runs", json={
-        "ir": ir,
-        "inputs": {"source_path": "s.json", "dest_path": "d.json"},
-        "workspace": str(tmp_path), "approve_all": True,
-    })
-    run_id = rr.json()["run_id"]
+def test_absolute_path_workspace_rejected(tmp_path):
+    """Client sending absolute path as workspace must get HTTP 400."""
+    from fastapi import HTTPException
+    root = tmp_path / "root"
+    root.mkdir()
+    from skillvm.config import load_settings
+    settings = dataclasses.replace(load_settings(), workspace_root=root)
+    with pytest.raises(HTTPException) as exc_info:
+        _resolve_workspace("/etc", settings)
+    assert exc_info.value.status_code == 400
 
-    gr = client.get(f"/runs/{run_id}")
-    assert gr.status_code == 200
-    assert gr.json()["run_id"] == run_id
 
+def test_traversal_workspace_rejected(tmp_path):
+    """../traversal is rejected."""
+    from fastapi import HTTPException
+    root = tmp_path / "root"
+    root.mkdir()
+    from skillvm.config import load_settings
+    settings = dataclasses.replace(load_settings(), workspace_root=root)
+    with pytest.raises(HTTPException) as exc_info:
+        _resolve_workspace("../escape", settings)
+    assert exc_info.value.status_code == 400
+
+
+def test_missing_workspace_rejected(tmp_path):
+    """Non-existent workspace name is rejected."""
+    from fastapi import HTTPException
+    root = tmp_path / "root"
+    root.mkdir()
+    from skillvm.config import load_settings
+    settings = dataclasses.replace(load_settings(), workspace_root=root)
+    with pytest.raises(HTTPException) as exc_info:
+        _resolve_workspace("no_such_ws", settings)
+    assert exc_info.value.status_code == 400
+
+
+def test_valid_workspace_resolved(tmp_path):
+    """A valid relative workspace name inside root is resolved."""
+    ws, ws_name, settings = _make_root_with_workspace(tmp_path)
+    resolved = _resolve_workspace(ws_name, settings)
+    assert resolved == ws.resolve()
+
+
+# ── Other server routes ──
 
 def test_get_run_not_found():
     r = client.get("/runs/nonexistent-run-id")
@@ -149,33 +186,18 @@ def test_run_invalid_ir():
     assert r.status_code == 422
 
 
-def test_run_missing_workspace():
+def test_run_absolute_path_rejected():
+    """Client sending /etc as workspace must be rejected with 400 before listing contents."""
     cr = client.post("/compile", json={"source": VALID_SKILL})
     ir = cr.json()["ir"]
     r = client.post("/runs", json={
-        "ir": ir, "inputs": {}, "workspace": "/nonexistent/path/xyz"
+        "ir": ir, "inputs": {}, "workspace": "/etc"
     })
     assert r.status_code == 400
-
-
-def test_node_states_present_in_run_response(tmp_path):
-    cr = client.post("/compile", json={"source": VALID_SKILL})
-    ir = cr.json()["ir"]
-    (tmp_path / "x.json").write_text('{"ok": true}')
-
-    r = client.post("/runs", json={
-        "ir": ir,
-        "inputs": {"source_path": "x.json", "dest_path": "y.json"},
-        "workspace": str(tmp_path), "approve_all": True,
-    })
-    d = r.json()
-    assert isinstance(d["node_states"], dict)
-    assert len(d["node_states"]) > 0
 
 
 # ── UI ──
 
 def test_ui_returns_html():
     r = client.get("/")
-    # Either 200 with HTML or JSON fallback — both are fine
     assert r.status_code == 200

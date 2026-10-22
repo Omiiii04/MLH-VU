@@ -1,0 +1,1 @@
+{"inputs": {"file_path": "config.json", "expected_keys": "id,name,version"}, "workspace_files": {"config.json": {"id": "svc-1", "name": "my-service", "version": "2.0"}}}

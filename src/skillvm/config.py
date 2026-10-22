@@ -38,12 +38,14 @@ class Settings:
     openrouter_model: str
     lmstudio_base_url: str
     lmstudio_model: str
+    lmstudio_api_key: str  # separate from model; usually empty/"lm-studio" for local
     request_timeout: float
     max_retries: int
     max_fallback: int
     overall_deadline: float
     temperature: float
     data_dir: Path
+    workspace_root: Path  # SKILLVM_WORKSPACE_ROOT — set by server, never by client
     bind: str
     port: int
 
@@ -51,6 +53,11 @@ class Settings:
 def load_settings() -> Settings:
     order = os.environ.get("LLM_PROVIDER_ORDER", "google,openrouter,lmstudio")
     data = os.environ.get("SKILLVM_DATA_DIR", ".skillvm")
+    data_path = Path(data)
+    # Workspace root defaults to a 'workspaces' subdirectory inside the data dir.
+    # Override via SKILLVM_WORKSPACE_ROOT. Never accept this from client requests.
+    ws_root_env = os.environ.get("SKILLVM_WORKSPACE_ROOT", "")
+    workspace_root = Path(ws_root_env) if ws_root_env else data_path / "workspaces"
     return Settings(
         provider_order=[p.strip() for p in order.split(",") if p.strip()],
         fallback_enabled=_b("LLM_FALLBACK_ENABLED", True),
@@ -66,12 +73,14 @@ def load_settings() -> Settings:
             "LMSTUDIO_BASE_URL", "http://localhost:1234/v1"
         ).strip(),
         lmstudio_model=os.environ.get("LMSTUDIO_MODEL", "").strip(),
+        lmstudio_api_key=os.environ.get("LMSTUDIO_API_KEY", "lm-studio").strip(),
         request_timeout=_f("LLM_REQUEST_TIMEOUT_SECONDS", 60),
         max_retries=_i("LLM_MAX_RETRIES_PER_PROVIDER", 1),
         max_fallback=_i("LLM_MAX_FALLBACK_ATTEMPTS", 3),
         overall_deadline=_f("LLM_OVERALL_DEADLINE_SECONDS", 120),
         temperature=_f("LLM_TEMPERATURE", 0),
-        data_dir=Path(data),
+        data_dir=data_path,
+        workspace_root=workspace_root,
         bind=os.environ.get("SKILLVM_BIND", "127.0.0.1"),
         port=_i("SKILLVM_PORT", 8477),
     )

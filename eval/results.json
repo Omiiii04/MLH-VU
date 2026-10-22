@@ -1,24 +1,30 @@
 {
-  "corpus": "eval\\corpus",
-  "n_per_skill": 2,
-  "n_skills": 4,
+  "_note": "Deterministic evaluation over 15-skill corpus. Baseline is a deterministic parser (NOT an LLM agent). LLM baseline not yet executed (no provider configured). See README for how to run.",
+  "corpus": "eval/corpus",
+  "n_per_skill": 1,
+  "n_skills": 15,
+  "llm_baseline_executed": false,
+  "baseline_type": "deterministic_parser",
+  "baseline_disclaimer": "The baseline is a deterministic step parser that reuses SkillVM helpers. It is NOT an LLM agent. Do not cite this comparison as evidence that compiled workflows improve LLM agent reliability. A genuine LLM baseline requires a real configured provider (see README: Running the LLM evaluation).",
   "arms": {
     "skillvm": {
-      "n": 8,
-      "task_success_rate": 0.75,
+      "n": 15,
+      "n_with_ground_truth": 15,
+      "task_success_rate": 0.6,
       "false_success_rate": 0.0,
-      "verified_success_rate": 0.5,
-      "error_rate": 0.25,
-      "mean_duration": 0.0016857375003382913,
+      "verified_success_rate": 0.13333333333333333,
+      "error_rate": 0.06666666666666667,
+      "mean_duration": 0.0032577000000552896,
       "per_skill": {}
     },
     "baseline": {
-      "n": 8,
+      "n": 15,
+      "n_with_ground_truth": 14,
       "task_success_rate": 0.5,
-      "false_success_rate": 0.25,
+      "false_success_rate": 0.42857142857142855,
       "verified_success_rate": 0.0,
       "error_rate": 0.0,
-      "mean_duration": 0.002272262501719524,
+      "mean_duration": 0.0022888533339331238,
       "per_skill": {}
     }
   }

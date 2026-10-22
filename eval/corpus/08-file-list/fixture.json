@@ -1,0 +1,1 @@
+{"inputs": {"dir_path": "data", "out_path": "listing.json"}, "workspace_files": {"data/a.txt": "alpha", "data/b.txt": "beta", "data/c.txt": "gamma"}}

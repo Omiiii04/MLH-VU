@@ -32,6 +32,7 @@ class SkillResult:
     task_success: bool      # ground truth says done
     false_success: bool     # claimed done but ground truth says no
     verified_success: bool  # runtime said VERIFIED_SUCCESS
+    ground_truth_available: bool = True  # False when no checker exists
     error: str | None = None
     duration: float = 0.0
 
@@ -56,12 +57,15 @@ def _setup_workspace(tmp: Path, fixture: dict) -> Path:
     return ws
 
 
-def _ground_truth(skill_dir: Path, workspace: Path) -> bool:
-    """Run independent ground-truth checker."""
+def _ground_truth(skill_dir: Path, workspace: Path) -> bool | None:
+    """Run independent ground-truth checker. Returns None if no checker exists.
+
+    IMPORTANT: A missing checker is NOT evidence of success.
+    Callers must treat None as 'unknown', not True.
+    """
     gt_file = skill_dir / "ground_truth.py"
     if not gt_file.exists():
-        # No ground truth = unknown, treat as success if any output file exists
-        return True
+        return None  # unknown — never treat as success
     import importlib.util
     spec = importlib.util.spec_from_file_location("gt", gt_file)
     mod = importlib.util.module_from_spec(spec)
@@ -86,16 +90,24 @@ def run_skillvm_arm(skill_dir: Path, n: int) -> list[SkillResult]:
         try:
             ws = _setup_workspace(tmp, fixture)
             t0 = time.monotonic()
-            # Auto-approve for eval
             approvals = {n.id: f"approved:{n.id}" for n in compile_result.ir.nodes if n.type == "approval"}
             run_rec = execute_ir(compile_result.ir, fixture.get("inputs", {}), workspace=ws, pending_approvals=approvals)
             dt = time.monotonic() - t0
             verified = run_rec.state == RunState.VERIFIED_SUCCESS
             gt = _ground_truth(skill_dir, ws)
-            false_success = verified and not gt
-            results.append(SkillResult(skill_id=skill_id, arm="skillvm", run_index=i, task_success=gt, false_success=false_success, verified_success=verified, duration=dt))
+            gt_available = gt is not None
+            gt_bool = bool(gt) if gt is not None else False  # unknown = not-success
+            false_success = verified and not gt_bool
+            results.append(SkillResult(
+                skill_id=skill_id, arm="skillvm", run_index=i,
+                task_success=gt_bool, false_success=false_success,
+                verified_success=verified, ground_truth_available=gt_available, duration=dt,
+            ))
         except Exception as e:
-            results.append(SkillResult(skill_id=skill_id, arm="skillvm", run_index=i, task_success=False, false_success=False, verified_success=False, error=str(e)))
+            results.append(SkillResult(
+                skill_id=skill_id, arm="skillvm", run_index=i,
+                task_success=False, false_success=False, verified_success=False, error=str(e),
+            ))
         finally:
             import shutil
             shutil.rmtree(tmp, ignore_errors=True)
@@ -114,7 +126,10 @@ def run_baseline_arm(skill_dir: Path, n: int) -> list[SkillResult]:
         try:
             ws = _setup_workspace(tmp, fixture)
             t0 = time.monotonic()
-            # Baseline: parse steps, run tools naively, claim success
+            # NOTE: This baseline is a DETERMINISTIC PARSER, not an LLM agent.
+            # It reuses SkillVM helpers to infer and invoke tools.
+            # It does NOT send any LLM request. Do not present this as evidence
+            # that compiling AI skills improves LLM agent reliability.
             from skillvm.parse import parse_skill
             from skillvm.compiler import _infer_tool, _path_from_step
             from skillvm.tools import execute_tool
@@ -143,10 +158,19 @@ def run_baseline_arm(skill_dir: Path, n: int) -> list[SkillResult]:
                     claimed_success = False
             dt = time.monotonic() - t0
             gt = _ground_truth(skill_dir, ws)
-            false_success = claimed_success and not gt
-            results.append(SkillResult(skill_id=skill_id, arm="baseline", run_index=i, task_success=gt, false_success=false_success, verified_success=False, duration=dt))
+            gt_available = gt is not None
+            gt_bool = bool(gt) if gt is not None else False
+            false_success = claimed_success and not gt_bool
+            results.append(SkillResult(
+                skill_id=skill_id, arm="baseline", run_index=i,
+                task_success=gt_bool, false_success=false_success,
+                verified_success=False, ground_truth_available=gt_available, duration=dt,
+            ))
         except Exception as e:
-            results.append(SkillResult(skill_id=skill_id, arm="baseline", run_index=i, task_success=False, false_success=False, verified_success=False, error=str(e)))
+            results.append(SkillResult(
+                skill_id=skill_id, arm="baseline", run_index=i,
+                task_success=False, false_success=False, verified_success=False, error=str(e),
+            ))
         finally:
             import shutil
             shutil.rmtree(tmp, ignore_errors=True)
@@ -157,10 +181,12 @@ def _aggregate(results: list[SkillResult]) -> dict:
     if not results:
         return {}
     n = len(results)
+    with_gt = [r for r in results if r.ground_truth_available]
     return {
         "n": n,
-        "task_success_rate": sum(r.task_success for r in results) / n,
-        "false_success_rate": sum(r.false_success for r in results) / n,
+        "n_with_ground_truth": len(with_gt),
+        "task_success_rate": sum(r.task_success for r in with_gt) / len(with_gt) if with_gt else None,
+        "false_success_rate": sum(r.false_success for r in with_gt) / len(with_gt) if with_gt else None,
         "verified_success_rate": sum(r.verified_success for r in results) / n,
         "error_rate": sum(1 for r in results if r.error) / n,
         "mean_duration": sum(r.duration for r in results) / n,
@@ -196,4 +222,14 @@ def run_eval(corpus_dir: Path, n_per_skill: int = 3, run_baseline: bool = True) 
         "n_per_skill": n_per_skill,
         "n_skills": len(skill_dirs),
         "arms": arms,
+        # Research-integrity metadata.
+        "baseline_type": "deterministic_parser",
+        "baseline_disclaimer": (
+            "The baseline is a deterministic step parser that reuses SkillVM helpers. "
+            "It is NOT an LLM agent. Do not cite this comparison as evidence that "
+            "compiled workflows improve LLM agent reliability. "
+            "A genuine LLM baseline requires a real configured provider "
+            "(see README: Running the LLM evaluation)."
+        ),
+        "llm_baseline_executed": False,
     }

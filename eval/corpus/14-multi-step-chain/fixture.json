@@ -1,0 +1,1 @@
+{"inputs": {"raw_path": "raw.json", "slim_path": "slim.json", "out_path": "final.json"}, "workspace_files": {"raw.json": {"id": 42, "score": 97, "noise": "discard", "extra": [1,2,3]}}}

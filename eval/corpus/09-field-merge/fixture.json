@@ -1,0 +1,1 @@
+{"inputs": {"base_path": "base.json", "patch_path": "patch.json", "out_path": "merged.json"}, "workspace_files": {"base.json": {"a": 1, "b": 2}, "patch.json": {"b": 99, "c": 3}}}

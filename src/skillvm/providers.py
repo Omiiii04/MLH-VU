@@ -43,6 +43,13 @@ class SchemaInvalidError(ProviderError):
     pass
 
 
+class ProviderExhaustedError(ProviderError):
+    """All providers failed. Carries sanitized attempt records."""
+    def __init__(self, msg: str, attempts: list["ProviderAttempt"]):
+        super().__init__(msg)
+        self.attempts = attempts
+
+
 @dataclass
 class ProviderAttempt:
     provider: str
@@ -132,20 +139,32 @@ class GeminiProvider(BaseProvider):
         if not model:
             raise ModelNotFoundError("GEMINI_MODEL not set — run: skillvm probe")
 
+        self._current_model = model  # record for ProviderManager
         client = genai.Client(api_key=api_key)
         config_kwargs: dict[str, Any] = {}
-        # Probe: Gemma 4 on Gemini API may not support system instructions or JSON mode.
-        # We prepend system to user if needed (detected by probe result).
-        combined_user = f"[SYSTEM]\n{system}\n\n[USER]\n{user}" if system else user
+        # Use system_instruction if the SDK supports it; fall back to prepended user text.
+        # Detect support by checking for the attribute on GenerateContentConfig.
+        use_system_instruction = hasattr(gtypes.GenerateContentConfig, "system_instruction")
+        if use_system_instruction and system:
+            config_kwargs["system_instruction"] = system
+            combined_user = user
+        else:
+            combined_user = f"[SYSTEM]\n{system}\n\n[USER]\n{user}" if system else user
+
         if response_schema:
             config_kwargs["response_mime_type"] = "application/json"
 
         timeout = settings.request_timeout if settings else 60
+        # Apply timeout via httpx_options when supported, or accept best-effort.
+        timeout_kwargs: dict[str, Any] = {}
+        if hasattr(gtypes.GenerateContentConfig, "timeout"):
+            timeout_kwargs["timeout"] = timeout
+
         try:
             response = client.models.generate_content(
                 model=model,
                 contents=combined_user,
-                config=gtypes.GenerateContentConfig(**config_kwargs) if config_kwargs else None,
+                config=gtypes.GenerateContentConfig(**config_kwargs, **timeout_kwargs) if (config_kwargs or timeout_kwargs) else None,
             )
             return response.text or ""
         except Exception as e:
@@ -201,13 +220,48 @@ class GeminiProvider(BaseProvider):
 
 
 def _classify_genai_error(e: Exception) -> None:
-    msg = str(e).lower()
-    if "auth" in msg or "api_key" in msg or "permission" in msg:
+    """Raise a typed ProviderError from a google-genai exception.
+
+    Primary: inspect the exception type and HTTP status code.
+    Narrow fallback: inspect metadata fields on the exception object.
+    Never classify by free-form message substrings that could match unrelated text.
+    """
+    # Try to get HTTP status code from the exception (varies by SDK version).
+    status_code: int | None = None
+    for attr in ("status_code", "code", "http_status"):
+        val = getattr(e, attr, None)
+        if isinstance(val, int):
+            status_code = val
+            break
+
+    # Check typed exception classes first (SDK may expose these).
+    exc_name = type(e).__name__
+    if exc_name in ("ClientError",) and status_code == 401:
         raise AuthError(str(e)) from e
-    if "not found" in msg or "404" in msg:
+    if exc_name in ("ClientError",) and status_code == 404:
         raise ModelNotFoundError(str(e)) from e
-    if "429" in msg or "quota" in msg or "rate" in msg:
+    if exc_name in ("ClientError",) and status_code == 429:
         raise RateLimitError(str(e)) from e
+
+    # Status-code classification (when type alone is insufficient).
+    if status_code == 401 or status_code == 403:
+        raise AuthError(str(e)) from e
+    if status_code == 404:
+        raise ModelNotFoundError(str(e)) from e
+    if status_code == 429:
+        raise RateLimitError(str(e)) from e
+
+    # Narrow metadata fallback: only inspect structured error fields, not free-form message.
+    details = getattr(e, "details", None) or getattr(e, "error", None)
+    if isinstance(details, dict):
+        code_str = str(details.get("code", "") or details.get("status", "")).upper()
+        if code_str in ("UNAUTHENTICATED", "PERMISSION_DENIED"):
+            raise AuthError(str(e)) from e
+        if code_str == "NOT_FOUND":
+            raise ModelNotFoundError(str(e)) from e
+        if code_str == "RESOURCE_EXHAUSTED":
+            raise RateLimitError(str(e)) from e
+
     raise ProviderError(str(e)) from e
 
 
@@ -232,19 +286,28 @@ class OpenAICompatProvider(BaseProvider):
             model = settings.openrouter_model if settings else os.environ.get("OPENROUTER_MODEL", "")
         else:  # lmstudio
             base_url = settings.lmstudio_base_url if settings else os.environ.get("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
-            api_key = settings.lmstudio_model if settings else os.environ.get("LMSTUDIO_API_KEY", "lm-studio")  # LM Studio ignores key
-            model = settings.lmstudio_model if settings else os.environ.get("LMSTUDIO_MODEL", "")
-            if not api_key:
-                api_key = "lm-studio"
+            # Use lmstudio_api_key (separate from model). For local servers that
+            # don't require auth, the default "lm-studio" placeholder is used.
+            if settings:
+                api_key = settings.lmstudio_api_key or "lm-studio"
+                model = settings.lmstudio_model
+            else:
+                api_key = os.environ.get("LMSTUDIO_API_KEY", "lm-studio") or "lm-studio"
+                model = os.environ.get("LMSTUDIO_MODEL", "")
         if not api_key:
             raise AuthError(f"{self.name}: API key not set")
         if not model:
             raise ModelNotFoundError(f"{self.name}: model not set — run: skillvm probe")
+        self._current_model = model  # record for ProviderManager
         client = OpenAI(base_url=base_url, api_key=api_key)
         return client, model
 
     def generate(self, system: str, user: str, response_schema: dict | None = None, settings: Settings | None = None) -> str:
-        from openai import AuthenticationError, NotFoundError
+        from openai import AuthenticationError, NotFoundError, RateLimitError as OAIRateLimit
+        try:
+            from openai import APITimeoutError, APIConnectionError
+        except ImportError:
+            APITimeoutError = APIConnectionError = None  # older SDK
         client, model = self._client_and_model(settings)
         messages = []
         if system:
@@ -261,10 +324,21 @@ class OpenAICompatProvider(BaseProvider):
             raise AuthError(str(e)) from e
         except NotFoundError as e:
             raise ModelNotFoundError(str(e)) from e
+        except OAIRateLimit as e:
+            raise RateLimitError(str(e)) from e
         except Exception as e:
-            msg = str(e).lower()
-            if "429" in msg or "rate" in msg:
+            # Use HTTP status code if available; never match free-form substrings.
+            status = getattr(e, "status_code", None)
+            if status == 429:
                 raise RateLimitError(str(e)) from e
+            if status in (401, 403):
+                raise AuthError(str(e)) from e
+            if status == 404:
+                raise ModelNotFoundError(str(e)) from e
+            if APITimeoutError and isinstance(e, APITimeoutError):
+                raise ProviderError(f"timeout: {e}") from e
+            if APIConnectionError and isinstance(e, APIConnectionError):
+                raise ProviderError(f"connection: {e}") from e
             raise ProviderError(str(e)) from e
 
     def list_models(self, settings: Settings | None = None) -> list[str]:
@@ -317,9 +391,10 @@ class ProviderManager:
         for provider in self.providers[:max_fallback]:
             if time.monotonic() > deadline:
                 break
+            model = getattr(provider, "_current_model", "") or ""
             attempt = ProviderAttempt(
                 provider=provider.name,
-                model="",
+                model=model,
                 started_at=time.monotonic(),
                 prompt_hash=phash,
                 prompt_excerpt=pexcerpt,
@@ -328,11 +403,13 @@ class ProviderManager:
                 text = provider.generate(system=system, user=user, response_schema=response_schema, settings=settings)
                 attempt.finished_at = time.monotonic()
                 attempt.outcome = "success"
+                # Record the model that was actually used (set by provider during generate).
+                attempt.model = getattr(provider, "_current_model", model) or model
                 attempts.append(attempt)
                 return ProviderResult(
                     text=text,
                     provider=provider.name,
-                    model=getattr(provider, "_last_model", ""),
+                    model=attempt.model,
                     attempts=attempts,
                 )
             except AuthError as e:
@@ -356,7 +433,10 @@ class ProviderManager:
                 attempt.finished_at = time.monotonic(); attempts.append(attempt)
                 continue
 
-        raise ProviderError(f"All providers failed. Attempts: {[a.outcome for a in attempts]}")
+        raise ProviderExhaustedError(
+            f"All providers failed. Attempts: {[a.outcome for a in attempts]}",
+            attempts=attempts,
+        )
 
 
 def build_manager(settings: Settings) -> ProviderManager:
