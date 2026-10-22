@@ -1,0 +1,178 @@
+{
+  "schema_version": "1.0",
+  "skill_id": "copy-json",
+  "content_hash": "HASH",
+  "compiler_version": "0.1.0",
+  "provider": null,
+  "model": null,
+  "prompt_version": null,
+  "constrained_mode": "deterministic",
+  "compiled_at": "TS",
+  "inputs": [
+    {
+      "name": "source_path",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "dest_path",
+      "type": "string",
+      "required": true
+    }
+  ],
+  "outputs": [],
+  "nodes": [
+    {
+      "id": "in_source_path",
+      "depends_on": [],
+      "source": null,
+      "timeout_seconds": 30.0,
+      "fallback": false,
+      "type": "input",
+      "name": "source_path",
+      "value_type": "string"
+    },
+    {
+      "id": "in_dest_path",
+      "depends_on": [],
+      "source": null,
+      "timeout_seconds": 30.0,
+      "fallback": false,
+      "type": "input",
+      "name": "dest_path",
+      "value_type": "string"
+    },
+    {
+      "id": "step_1",
+      "depends_on": [
+        "in_dest_path"
+      ],
+      "source": null,
+      "timeout_seconds": 30.0,
+      "fallback": false,
+      "type": "tool",
+      "tool": "fs.read",
+      "args": {
+        "path": {
+          "$bind": "in_source_path"
+        }
+      },
+      "effect": "read",
+      "idempotent": true,
+      "permissions": [
+        "fs.read"
+      ]
+    },
+    {
+      "id": "step_2",
+      "depends_on": [
+        "step_1"
+      ],
+      "source": null,
+      "timeout_seconds": 30.0,
+      "fallback": false,
+      "type": "tool",
+      "tool": "json.parse",
+      "args": {
+        "text": {
+          "$bind": "step_1"
+        }
+      },
+      "effect": "read",
+      "idempotent": true,
+      "permissions": [
+        "json.parse"
+      ]
+    },
+    {
+      "id": "step_3",
+      "depends_on": [
+        "step_2"
+      ],
+      "source": null,
+      "timeout_seconds": 30.0,
+      "fallback": false,
+      "type": "tool",
+      "tool": "fs.write",
+      "args": {
+        "path": {
+          "$bind": "in_dest_path"
+        },
+        "content": {
+          "$bind": "step_2"
+        }
+      },
+      "effect": "reversible_write",
+      "idempotent": true,
+      "permissions": [
+        "fs.write"
+      ]
+    },
+    {
+      "id": "verify_0",
+      "depends_on": [
+        "step_3"
+      ],
+      "source": null,
+      "timeout_seconds": 30.0,
+      "fallback": false,
+      "type": "verify",
+      "check": "file_exists",
+      "args": {
+        "path": "{dest_path}"
+      },
+      "required": true
+    },
+    {
+      "id": "verify_1",
+      "depends_on": [
+        "verify_0"
+      ],
+      "source": null,
+      "timeout_seconds": 30.0,
+      "fallback": false,
+      "type": "verify",
+      "check": "json_matches_schema",
+      "args": {
+        "path": "{dest_path}",
+        "schema": {
+          "type": "object",
+          "required": [
+            "ok"
+          ]
+        }
+      },
+      "required": true
+    }
+  ],
+  "edges": [
+    {
+      "src": "in_dest_path",
+      "dst": "step_1"
+    },
+    {
+      "src": "step_1",
+      "dst": "step_2"
+    },
+    {
+      "src": "step_2",
+      "dst": "step_3"
+    },
+    {
+      "src": "step_3",
+      "dst": "verify_0"
+    },
+    {
+      "src": "verify_0",
+      "dst": "verify_1"
+    }
+  ],
+  "permissions": [
+    "fs.read",
+    "fs.write",
+    "json.parse",
+    "verify.run"
+  ],
+  "fallback_steps": 0,
+  "total_steps": 3
+}

@@ -1,0 +1,4 @@
+{
+  "inputs": {"source_path": "input.json", "dest_path": "output.json"},
+  "workspace_files": {"input.json": {"value": 42}}
+}
