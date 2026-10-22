@@ -60,10 +60,10 @@
     "semantic_hash": "c99ee791be72d8ad05541cc0be5be006"
   },
   "src/skillvm/cli.py": {
-    "mtime": 1792656534.622258,
-    "seen": 1792658915.3923054,
-    "ast_hash": "93263cfc52d73d36e356eaea77805710",
-    "semantic_hash": "93263cfc52d73d36e356eaea77805710"
+    "mtime": 1792661292.4727516,
+    "seen": 1792661597.7700696,
+    "ast_hash": "904d0d97e26054440d72bb678faae6e6",
+    "semantic_hash": ""
   },
   "src/skillvm/compiler.py": {
     "mtime": 1792656074.4934707,
@@ -195,6 +195,24 @@
     "mtime": 1792658321.6305876,
     "seen": 1792660502.8086011,
     "ast_hash": "e948f68a6f60f33f40969826ea9ebc17",
+    "semantic_hash": ""
+  },
+  "src/skillvm/llm_compile.py": {
+    "mtime": 1792661267.3486102,
+    "seen": 1792661597.770078,
+    "ast_hash": "854608811ec185b40b3646d65e27fd43",
+    "semantic_hash": ""
+  },
+  "tests/test_live.py": {
+    "mtime": 1792661397.4476297,
+    "seen": 1792661597.7700915,
+    "ast_hash": "e5a580dc15987f35d674fd2179a7784e",
+    "semantic_hash": ""
+  },
+  "tests/test_llm_compile.py": {
+    "mtime": 1792661336.5612948,
+    "seen": 1792661597.7700925,
+    "ast_hash": "15bd84ec7c816ff8b5458b96f27f56c8",
     "semantic_hash": ""
   }
 }
