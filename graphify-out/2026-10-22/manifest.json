@@ -60,9 +60,9 @@
     "semantic_hash": "c99ee791be72d8ad05541cc0be5be006"
   },
   "src/skillvm/cli.py": {
-    "mtime": 1792661292.4727516,
-    "seen": 1792661597.7700696,
-    "ast_hash": "904d0d97e26054440d72bb678faae6e6",
+    "mtime": 1792662059.2376847,
+    "seen": 1792662487.8940768,
+    "ast_hash": "4b3c168b9eb729299d06b4034aa7f643",
     "semantic_hash": ""
   },
   "src/skillvm/compiler.py": {
@@ -213,6 +213,24 @@
     "mtime": 1792661336.5612948,
     "seen": 1792661597.7700925,
     "ast_hash": "15bd84ec7c816ff8b5458b96f27f56c8",
+    "semantic_hash": ""
+  },
+  "src/skillvm/server.py": {
+    "mtime": 1792661677.8632627,
+    "seen": 1792662487.8940933,
+    "ast_hash": "f32240fb763618c23b6d91471e456ce4",
+    "semantic_hash": ""
+  },
+  "tests/test_server.py": {
+    "mtime": 1792662002.2140687,
+    "seen": 1792662487.894106,
+    "ast_hash": "1b736cc0c7a106963314ffa975d3a2d5",
+    "semantic_hash": ""
+  },
+  "src/skillvm/ui/index.html": {
+    "mtime": 1792661895.9547305,
+    "seen": 1792662487.8941138,
+    "ast_hash": "d442d05d7cef58d5f490645bf1b709ac",
     "semantic_hash": ""
   }
 }
