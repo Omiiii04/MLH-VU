@@ -21,11 +21,24 @@ def compile(
     skill: Path = typer.Argument(..., help="Path to SKILL.md"),
     out: Optional[Path] = typer.Option(None, "--out", "-o", help="Write IR JSON to file"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
+    llm: bool = typer.Option(False, "--llm", help="Use model-assisted compilation (skill text sent to configured providers)"),
 ):
     """Compile a SKILL.md to typed IR and show diagnostics."""
-    from skillvm.compiler import compile_skill
     source = skill.read_text(encoding="utf-8")
-    result = compile_skill(source)
+
+    if llm:
+        from skillvm.llm_compile import compile_with_llm
+        from skillvm.providers import build_manager
+        settings = _load_settings()
+        if not settings.local_only:
+            typer.echo("Note: --llm is set and LLM_LOCAL_ONLY=false — skill text will be sent to remote providers.")
+        manager = build_manager(settings)
+        result = compile_with_llm(source, manager)
+        if result.ir:
+            typer.echo(f"Provider: {result.ir.provider}  Model: {result.ir.model}  Mode: {result.ir.constrained_mode}")
+    else:
+        from skillvm.compiler import compile_skill
+        result = compile_skill(source)
 
     typer.echo(f"Status: {result.status.value}")
     typer.echo(f"Steps: {result.total_steps}  Fallback: {result.fallback_steps}")
