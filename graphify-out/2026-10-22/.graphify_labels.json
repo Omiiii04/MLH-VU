@@ -1,9 +1,6 @@
 {
-  "0": "providers.py",
   "1": "compiler.py",
-  "2": "execute_ir",
   "3": "eval.py",
-  "5": "test_security.py",
   "6": "compile_skill",
   "8": "skillvm"
 }
